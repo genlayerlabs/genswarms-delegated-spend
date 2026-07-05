@@ -12,6 +12,14 @@ fails on divergence.
 
 ### Added
 
+- **Supervision-friendly process options:** `Signer.start_link` and
+  `Keeper.start_link` accept `name:` (a restarted process stays reachable at
+  the same name — app ctx never holds a stale pid); `Intake.Rate.start_link/2`
+  (returns `{:ok, pid}`, accepts `name:`); keeper `reconcile_on_init: true`
+  runs boot reconciliation as the keeper's own first message, so a
+  supervisor restart self-heals without an external `reconcile_boot` call.
+  Defaults preserve existing behavior exactly.
+
 - **Keeper swarm-object door (`DelegatedSpend.Keeper.Object`):** a GenSwarms
   `ObjectHandler` over the keeper core. Other swarm objects register orders,
   query status, and reset revert backoff by JSON message; source authority is

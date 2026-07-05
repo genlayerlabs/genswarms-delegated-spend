@@ -102,8 +102,18 @@ defmodule DelegatedSpend.Intake.Rate do
   @moduledoc "Minimal per-user_ref fixed-window rate limiter (Agent)."
 
   def start(window_s \\ 60) do
-    {:ok, pid} = Agent.start_link(fn -> %{window_s: window_s, buckets: %{}} end)
+    {:ok, pid} = start_link(window_s)
     pid
+  end
+
+  @doc """
+  Supervision-friendly variant: returns `{:ok, pid}` and accepts `name:` so a
+  restarted limiter stays reachable at the same name (an app passing the name
+  in its intake ctx never holds a stale pid).
+  """
+  def start_link(window_s \\ 60, opts \\ []) do
+    agent_opts = if opts[:name], do: [name: opts[:name]], else: []
+    Agent.start_link(fn -> %{window_s: window_s, buckets: %{}} end, agent_opts)
   end
 
   def allow?(pid, key, max, now_s \\ System.os_time(:second)) do

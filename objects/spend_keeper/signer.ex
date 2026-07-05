@@ -28,7 +28,16 @@ defmodule DelegatedSpend.Keeper.Signer do
   @fee_bump_num 5
   @fee_bump_den 4
 
-  def start_link(opts), do: GenServer.start_link(__MODULE__, Map.new(opts))
+  # Optional :name registers the server (supervision-friendly: a restarted
+  # signer is reachable at the same name, so holders never keep a stale pid).
+  def start_link(opts) do
+    opts = Map.new(opts)
+
+    case Map.get(opts, :name) do
+      nil -> GenServer.start_link(__MODULE__, opts)
+      name -> GenServer.start_link(__MODULE__, opts, name: name)
+    end
+  end
 
   def submit(server, action_key, tx),
     do: GenServer.call(server, {:submit, action_key, tx}, 60_000)

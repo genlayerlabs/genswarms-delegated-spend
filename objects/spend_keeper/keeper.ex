@@ -31,10 +31,16 @@ defmodule DelegatedSpend.Keeper do
 
   @enforce_opts [:signer, :store, :router, :action, :source_allowlist, :order_ttl_s]
 
+  # Optional :name registers the server (supervision-friendly: a restarted
+  # keeper is reachable at the same name, so app ctx never holds a stale pid).
   def start_link(opts) do
     opts = Map.new(opts)
     Enum.each(@enforce_opts, &Map.fetch!(opts, &1))
-    GenServer.start_link(__MODULE__, opts)
+
+    case Map.get(opts, :name) do
+      nil -> GenServer.start_link(__MODULE__, opts)
+      name -> GenServer.start_link(__MODULE__, opts, name: name)
+    end
   end
 
   def register_order(keeper, source, order_req),
@@ -92,6 +98,12 @@ defmodule DelegatedSpend.Keeper do
     }
 
     Process.send_after(self(), :sweep, state.sweep_ms)
+
+    # Supervision-friendly: a supervisor can't easily run the reconcile_boot
+    # call after every (re)start, so the keeper can do it itself — first
+    # message in its own mailbox, before any order traffic it serves.
+    if Map.get(opts, :reconcile_on_init, false), do: send(self(), :reconcile_boot)
+
     {:ok, state}
   end
 
@@ -179,31 +191,7 @@ defmodule DelegatedSpend.Keeper do
   def handle_call(:sweep_now, _from, state), do: {:reply, :ok, do_sweep(state)}
 
   def handle_call(:reconcile_boot, _from, state) do
-    # Spec §5.3: complete result delivery for txs that mined while the keeper
-    # was down — but ONLY settle on a DEFINITIVE on-chain receipt. A row with
-    # no hash yet, or a hash with no receipt, is left in place (still pending):
-    # marking it failed here would falsely tell the app a payment did not
-    # happen while the tx is still mineable, risking a double payment via the
-    # fallback lane. Durable pre-broadcast write-ahead (so the sweep can
-    # re-adopt an orphaned tx after restart) is the recorded hardening
-    # follow-up; in M1 the keeper result is display-only (the chain watcher
-    # credits), so a still-pending row is safe.
-    state =
-      Enum.reduce(store(state).list_inflight(store_ref(state)), state, fn row, acc ->
-        with hash when is_binary(hash) <- row.tx_hash,
-             mod when not is_nil(mod) <- acc.rpc_mod,
-             receipt when is_map(receipt) <- safe_receipt(mod, acc.rpc, hash) do
-          case receipt do
-            %{"status" => "0x1"} -> settle(acc, row.order_id, {:credited, hash})
-            %{"status" => "0x0"} -> settle(acc, row.order_id, {:failed, :reverted})
-            _ -> acc
-          end
-        else
-          _ -> acc
-        end
-      end)
-
-    {:reply, :ok, state}
+    {:reply, :ok, do_reconcile(state)}
   end
 
   @impl true
@@ -212,7 +200,34 @@ defmodule DelegatedSpend.Keeper do
     {:noreply, do_sweep(state)}
   end
 
+  def handle_info(:reconcile_boot, state), do: {:noreply, do_reconcile(state)}
+
   def handle_info(_other, state), do: {:noreply, state}
+
+  # Spec §5.3: complete result delivery for txs that mined while the keeper
+  # was down — but ONLY settle on a DEFINITIVE on-chain receipt. A row with
+  # no hash yet, or a hash with no receipt, is left in place (still pending):
+  # marking it failed here would falsely tell the app a payment did not
+  # happen while the tx is still mineable, risking a double payment via the
+  # fallback lane. Durable pre-broadcast write-ahead (so the sweep can
+  # re-adopt an orphaned tx after restart) is the recorded hardening
+  # follow-up; in M1 the keeper result is display-only (the chain watcher
+  # credits), so a still-pending row is safe.
+  defp do_reconcile(state) do
+    Enum.reduce(store(state).list_inflight(store_ref(state)), state, fn row, acc ->
+      with hash when is_binary(hash) <- row.tx_hash,
+           mod when not is_nil(mod) <- acc.rpc_mod,
+           receipt when is_map(receipt) <- safe_receipt(mod, acc.rpc, hash) do
+        case receipt do
+          %{"status" => "0x1"} -> settle(acc, row.order_id, {:credited, hash})
+          %{"status" => "0x0"} -> settle(acc, row.order_id, {:failed, :reverted})
+          _ -> acc
+        end
+      else
+        _ -> acc
+      end
+    end)
+  end
 
   # ── execution ─────────────────────────────────────────────────────────────
 

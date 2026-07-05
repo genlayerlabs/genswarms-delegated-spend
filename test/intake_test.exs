@@ -231,6 +231,13 @@ defmodule DelegatedSpend.IntakeTest do
     assert {429, %{"error" => "rate limited"}} = Intake.handle_grant(params, ctx)
   end
 
+  test "Rate.start_link with :name — supervision-friendly, usable by name in ctx" do
+    {:ok, pid} = Rate.start_link(60, name: :spend_rate_named_test)
+    assert Process.whereis(:spend_rate_named_test) == pid
+    assert Rate.allow?(:spend_rate_named_test, "u", 1)
+    refute Rate.allow?(:spend_rate_named_test, "u", 1)
+  end
+
   test "expired order surfaces as the typed 422 failure contract on handle_grant" do
     # order_ttl_s: 0 → the order expires immediately; the keeper's {:failed,
     # :expired} must map to the documented {422, status: failed, reason: expired}.

@@ -91,6 +91,55 @@ defmodule DelegatedSpend.KeeperTest do
     assert ref != minted and byte_size(ref) == 64
   end
 
+  test "supervision options: :name registration + reconcile_on_init self-heal" do
+    fake = FakeRpc.start(%{chain_id: 84_532, nonce: 0, simulate: :ok})
+
+    {:ok, signer} =
+      Signer.start_link(
+        rpc_url: fake,
+        chain_id: 84_532,
+        priv: @anvil0,
+        rpc_mod: FakeRpc,
+        sweep_ms: 3_600_000,
+        name: :spend_signer_named_test
+      )
+
+    # named signer reachable by name (what an app ctx would hold)
+    assert Process.whereis(:spend_signer_named_test) == signer
+    assert "0x" <> _ = Signer.address(:spend_signer_named_test)
+
+    # a mined-while-down inflight row: reconcile_on_init settles it without
+    # anyone calling reconcile_boot (the supervised-restart path)
+    store = MemoryStore.start()
+    order = %{order_id: "0xdead", order_ref: String.duplicate("aa", 32), user_ref: "u-a", amount: 5, action_args: [], expires_at: 4_000_000_000}
+    :ok = MemoryStore.put_order(store, order)
+    :ok = MemoryStore.put_inflight(store, "0xdead", "0xdead")
+    :ok = MemoryStore.update_inflight_hash(store, "0xdead", "0xhash")
+    FakeRpc.put(fake, :receipts, %{"0xhash" => %{"status" => "0x1"}})
+    parent = self()
+
+    {:ok, keeper} =
+      Keeper.start_link(
+        signer: :spend_signer_named_test,
+        store: {MemoryStore, store},
+        router: @router,
+        action: @action,
+        source_allowlist: ["market_phase"],
+        order_ttl_s: 600,
+        result_fn: fn r -> send(parent, {:result, r}) end,
+        rpc_mod: FakeRpc,
+        rpc: fake,
+        sweep_ms: 3_600_000,
+        name: :spend_keeper_named_test,
+        reconcile_on_init: true
+      )
+
+    assert Process.whereis(:spend_keeper_named_test) == keeper
+    assert_receive {:result, {"0xdead", {:credited, "0xhash"}}}, 1_000
+    # and the keeper answers by name
+    assert {:ok, _} = Keeper.register_order(:spend_keeper_named_test, "market_phase", order_req())
+  end
+
   test "fetch: cross-user is not-found; sanitized shape" do
     %{keeper: keeper} = start_stack()
     {:ok, %{order_ref: ref}} = Keeper.register_order(keeper, "market_phase", order_req())
