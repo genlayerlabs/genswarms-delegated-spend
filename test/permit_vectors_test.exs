@@ -33,10 +33,10 @@ defmodule DelegatedSpend.PermitVectorsTest do
 
   defp unhex("0x" <> h), do: Base.decode16!(h, case: :mixed)
 
-  test "vectors exist (generator ran) and pin version 0.1.0" do
+  test "vectors exist (generator ran) and pin version 0.2.0" do
     vs = vectors()
     assert length(vs) == 3
-    assert Enum.all?(vs, &(&1["version"] == "0.1.0"))
+    assert Enum.all?(vs, &(&1["version"] == "0.2.0"))
     assert Enum.all?(vs, &(&1["account_state"] == "eoa"))
   end
 

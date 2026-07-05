@@ -10,6 +10,18 @@ fails on divergence.
 
 ## [Unreleased]
 
+### Planned
+
+- **M2 — delegation lane (ERC-7710):** standing delegation with caveats,
+  redeemed through the user's account — one-tap payments over the same
+  router path. The base contract already carries the `delegationManager`
+  introspection view and the keeper's grant registry stores delegation
+  grants, but no redemption path exists yet.
+
+## [0.2.0] - 2026-07-05
+
+First published release (swarmidx `genlayerlabs/genswarms-delegated-spend`).
+
 ### Added
 
 - **Supervision-friendly process options:** `Signer.start_link` and
@@ -32,14 +44,6 @@ fails on divergence.
   The synchronous call door (`execute_with_permit/4` etc.) is unchanged — the
   intake HTTP path keeps its request/response shape. `swarmidx.json` gsp
   manifest added (`kind: handler`, module = the object door).
-
-### Planned
-
-- **M2 — delegation lane (ERC-7710):** standing delegation with caveats,
-  redeemed through the user's account — one-tap payments over the same
-  router path. The base contract already carries the `delegationManager`
-  introspection view and the keeper's grant registry stores delegation
-  grants, but no redemption path exists in 0.1.0.
 
 ## [0.1.0] - 2026-07-05
 

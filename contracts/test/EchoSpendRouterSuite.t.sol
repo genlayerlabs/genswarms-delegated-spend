@@ -61,7 +61,7 @@ contract EchoSpendRouterSuiteTest is SpendRouterTestBase {
         assertEq(echo.anchor(), anchor);
         assertEq(echo.delegationManager(), address(0));
         assertEq(echo.routerType(), keccak256("ECHO_SPEND_ROUTER"));
-        assertEq(echo.version(), "0.1.0");
+        assertEq(echo.version(), "0.2.0");
     }
 
     function test_destinations_differ_per_topic_and_beneficiary() public view {

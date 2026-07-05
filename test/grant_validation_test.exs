@@ -6,13 +6,13 @@ defmodule DelegatedSpend.GrantValidationTest do
     chain_id: 84_532,
     token: "0x0000000000000000000000000000000000000AaA",
     router: "0x0000000000000000000000000000000000000BbB",
-    version: "0.1.0"
+    version: "0.2.0"
   }
 
   defp env(overrides \\ %{}) do
     Map.merge(
       %{
-        "v" => "0.1.0",
+        "v" => "0.2.0",
         "chain_id" => 84_532,
         "token" => "0x0000000000000000000000000000000000000aaa",
         "spender" => "0x0000000000000000000000000000000000000bbb",

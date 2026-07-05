@@ -75,7 +75,7 @@ abstract contract SpendRouter is ISpendRouter {
     }
 
     function version() public pure returns (string memory) {
-        return "0.1.0";
+        return "0.2.0";
     }
 
     function routerType() external pure virtual returns (bytes32);

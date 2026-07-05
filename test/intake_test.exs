@@ -31,7 +31,7 @@ defmodule DelegatedSpend.IntakeTest do
 
   defp permit_env(value) do
     %{
-      "v" => "0.1.0",
+      "v" => "0.2.0",
       "chain_id" => 84_532,
       "token" => @token,
       "spender" => @router,
@@ -79,7 +79,7 @@ defmodule DelegatedSpend.IntakeTest do
       max_age_s: 900,
       user_ref_fn: fn user_id -> "ref-" <> Integer.to_string(user_id) end,
       keeper: keeper,
-      pinned: %{chain_id: 84_532, token: @token, router: @router, version: "0.1.0"},
+      pinned: %{chain_id: 84_532, token: @token, router: @router, version: "0.2.0"},
       rate: {Rate.start(60), rate_max}
     }
 

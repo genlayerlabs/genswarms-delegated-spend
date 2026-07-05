@@ -180,7 +180,7 @@ ctx = %{
   max_age_s: 900,
   user_ref_fn: fn uid -> "ref-" <> Integer.to_string(uid) end,
   keeper: keeper,
-  pinned: %{chain_id: chain_id, token: token, router: echo, version: "0.1.0"},
+  pinned: %{chain_id: chain_id, token: token, router: echo, version: "0.2.0"},
   rate: {Rate.start(60), 100}
 }
 
@@ -208,7 +208,7 @@ digest2 = PermitLane.permit_digest(domain_sep, user, echo, order_view["amount"],
 {r2, s2, recid2} = Secp256k1.sign(digest2, user_priv)
 
 envelope = %{
-  "v" => "0.1.0",
+  "v" => "0.2.0",
   "chain_id" => chain_id,
   "token" => token,
   "spender" => echo,
