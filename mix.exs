@@ -1,0 +1,29 @@
+defmodule GenswarmsDelegatedSpend.MixProject do
+  use Mix.Project
+
+  # Version is stamped here, in VERSION, vectors/VERSION and
+  # SpendRouter.version(); scripts/check-version.sh enforces the match.
+  def project do
+    [
+      app: :genswarms_delegated_spend,
+      version: "0.1.0",
+      elixir: "~> 1.14",
+      elixirc_paths: elixirc_paths(Mix.env()),
+      start_permanent: Mix.env() == :prod,
+      deps: deps()
+    ]
+  end
+
+  def application, do: [extra_applications: [:crypto, :logger]]
+
+  defp elixirc_paths(:test), do: ["objects", "test/support"]
+  defp elixirc_paths(_), do: ["objects"]
+
+  defp deps do
+    [
+      {:ex_abi, "~> 0.8"},
+      {:ex_rlp, "~> 0.6"},
+      {:jason, "~> 1.4"}
+    ]
+  end
+end

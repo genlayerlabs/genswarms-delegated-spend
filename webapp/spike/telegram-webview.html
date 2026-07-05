@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Spike 9.1a — Telegram webview ↔ wallet round trip</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    button, a.btn { display: block; margin: 0.5rem 0; padding: 0.7rem; font-size: 1rem;
+      background: #eef; border: 1px solid #99c; border-radius: 8px; text-decoration: none; color: #000; width: 100%; box-sizing: border-box; text-align: left; }
+    #log { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 0.8rem;
+      background: #f6f6f6; padding: 0.6rem; border-radius: 6px; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h2>Spike 9.1a harness</h2>
+  <p>Open this page from a Telegram bot's WebApp button on a REAL device
+     (iOS and Android separately) and run each probe top to bottom. Record
+     results in <code>docs/spike-9.1a-checklist.md</code>.</p>
+
+  <button id="env">1 · Environment probe</button>
+  <a class="btn" href="https://metamask.app.link/dapp/example.org">2 · Universal link → MetaMask (dapp browser)</a>
+  <a class="btn" href="metamask://dapp/example.org">3 · Raw scheme link → MetaMask (expected BLOCKED in Telegram webview — metamask-sdk#1103)</a>
+  <button id="injected">4 · Injected provider probe (only meaningful inside MetaMask's browser)</button>
+  <button id="sign">5 · eth_signTypedData_v4 round trip (inside wallet browser)</button>
+  <button id="ret">6 · Return-leg probe: t.me deep link back to the bot</button>
+
+  <div id="log">results appear here…</div>
+
+  <script>
+    const log = (m) => { document.getElementById("log").textContent += "\n" + m; };
+    const tg = window.Telegram && window.Telegram.WebApp;
+
+    document.getElementById("env").onclick = () => {
+      log(`ua: ${navigator.userAgent}`);
+      log(`telegram webapp: ${tg ? "yes, v" + tg.version + ", platform " + tg.platform : "NO"}`);
+      log(`initData present: ${tg && tg.initData ? "yes (" + tg.initData.length + " chars)" : "no"}`);
+      log(`window.ethereum: ${window.ethereum ? "INJECTED" : "absent"}`);
+    };
+
+    document.getElementById("injected").onclick = async () => {
+      if (!window.ethereum) return log("no injected provider here");
+      try {
+        const accts = await window.ethereum.request({ method: "eth_requestAccounts" });
+        const chain = await window.ethereum.request({ method: "eth_chainId" });
+        log(`accounts: ${accts.join(",")} chain: ${chain}`);
+      } catch (e) { log(`request failed: ${e.code} ${e.message}`); }
+    };
+
+    document.getElementById("sign").onclick = async () => {
+      if (!window.ethereum) return log("no injected provider here");
+      try {
+        const [acct] = await window.ethereum.request({ method: "eth_requestAccounts" });
+        const typed = JSON.stringify({
+          types: { EIP712Domain: [{ name: "name", type: "string" }], Probe: [{ name: "note", type: "string" }] },
+          primaryType: "Probe",
+          domain: { name: "spike-9.1a" },
+          message: { note: "delegated-spend webview probe" },
+        });
+        const sig = await window.ethereum.request({ method: "eth_signTypedData_v4", params: [acct, typed] });
+        log(`signTypedData OK: ${sig.slice(0, 20)}…`);
+      } catch (e) { log(`sign failed: ${e.code} ${e.message}`); }
+    };
+
+    document.getElementById("ret").onclick = () => {
+      log("opening t.me link back to the bot…");
+      const url = "https://t.me/BotFather"; // stand-in; use the app's bot in a real run
+      if (tg) tg.openTelegramLink(url); else location.href = url;
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Forge tests (includes ABI pins)
+        run: forge test -vvv
+        working-directory: contracts
+      - name: Version stamps
+        run: ./scripts/check-version.sh
+
+  keeper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.16"
+          otp-version: "26"
+      - run: mix deps.get
+      - run: mix test
+
+  webapp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Mock-provider flow tests
+        run: node --test webapp/tools/flow.test.mjs
+      - name: Vectors are the committed generator output (byte-identical)
+        run: |
+          node webapp/tools/gen-vectors.mjs
+          git diff --exit-code vectors/
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.16"
+          otp-version: "26"
+      - run: forge build
+        working-directory: contracts
+      - run: mix deps.get
+      - run: |
+          anvil --silent &
+          sleep 1
+          mix run test/e2e/anvil_permit_lane.exs
+      - name: Attestation tooling (positive + negative probe)
+        run: |
+          ADDR=$(cd contracts && forge create src/examples/EchoSpendRouter.sol:EchoSpendRouter \
+            --rpc-url http://127.0.0.1:8545 \
+            --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+            --broadcast \
+            --constructor-args 0x000000000000000000000000000000000000aaaa 0x000000000000000000000000000000000000bbbb 0x0000000000000000000000000000000000000000 \
+            | grep "Deployed to" | awk '{print $3}')
+          ./scripts/attest.sh http://127.0.0.1:8545 "$ADDR" EchoSpendRouter.sol EchoSpendRouter
+          if ./scripts/attest.sh http://127.0.0.1:8545 "$ADDR" MockERC20Permit.sol MockERC20Permit; then
+            echo "negative probe must fail"; exit 1
+          fi

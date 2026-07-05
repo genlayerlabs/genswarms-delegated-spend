@@ -1,0 +1,95 @@
+{
+  "version": "0.1.0",
+  "account_state": "eoa",
+  "domain": {
+    "name": "Mock USD Coin",
+    "version": "2",
+    "chain_id": 31337,
+    "token": "0x000000000000000000000000000000000000aaaa"
+  },
+  "permit": {
+    "owner": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    "spender": "0x000000000000000000000000000000000000bbbb",
+    "value": 1000000000000,
+    "nonce": 0,
+    "deadline": 4000000000
+  },
+  "signature": {
+    "raw": "0x4601ed068ad1d811e50d5c19a698e5833a96b38bf6cff19fd7e6cefe64d5d599323163160ac7b26055cc9c05397f4f879aea1bae2b674f54efe52fe40e2074381c",
+    "v": 28,
+    "r": "0x4601ed068ad1d811e50d5c19a698e5833a96b38bf6cff19fd7e6cefe64d5d599",
+    "s": "0x323163160ac7b26055cc9c05397f4f879aea1bae2b674f54efe52fe40e207438"
+  },
+  "envelope": {
+    "v": "0.1.0",
+    "chain_id": 31337,
+    "token": "0x000000000000000000000000000000000000aaaa",
+    "spender": "0x000000000000000000000000000000000000bbbb",
+    "owner": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    "value": 1000000000000,
+    "deadline": 4000000000,
+    "sig": {
+      "v": 28,
+      "r": "0x4601ed068ad1d811e50d5c19a698e5833a96b38bf6cff19fd7e6cefe64d5d599",
+      "s": "0x323163160ac7b26055cc9c05397f4f879aea1bae2b674f54efe52fe40e207438"
+    }
+  },
+  "typed_data": {
+    "types": {
+      "EIP712Domain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "uint256"
+        },
+        {
+          "name": "verifyingContract",
+          "type": "address"
+        }
+      ],
+      "Permit": [
+        {
+          "name": "owner",
+          "type": "address"
+        },
+        {
+          "name": "spender",
+          "type": "address"
+        },
+        {
+          "name": "value",
+          "type": "uint256"
+        },
+        {
+          "name": "nonce",
+          "type": "uint256"
+        },
+        {
+          "name": "deadline",
+          "type": "uint256"
+        }
+      ]
+    },
+    "primaryType": "Permit",
+    "domain": {
+      "name": "Mock USD Coin",
+      "version": "2",
+      "chainId": 31337,
+      "verifyingContract": "0x000000000000000000000000000000000000aaaa"
+    },
+    "message": {
+      "owner": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "spender": "0x000000000000000000000000000000000000bbbb",
+      "value": "1000000000000",
+      "nonce": "0",
+      "deadline": "4000000000"
+    }
+  }
+}

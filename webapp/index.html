@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Supply-chain posture (spec §6.2): fully static, zero external hosts.
+       No remote JS, no remote config, no fonts, no analytics. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:;" />
+  <title>Fast payments</title>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; margin: 1.25rem; }
+    #status { margin-top: 1rem; white-space: pre-wrap; }
+    button { font-size: 1.1rem; padding: 0.6rem 1.2rem; }
+    .muted { color: #777; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>Fast payments</h1>
+  <p id="summary">Loading order…</p>
+  <button id="pay" disabled>Review &amp; sign</button>
+  <p id="status"></p>
+  <p class="muted">
+    Delegated spending — you sign exactly one payment for exactly the shown
+    amount. Nothing else is authorized. The regular transfer option in chat
+    always remains available.
+  </p>
+  <script type="module" src="./app.mjs"></script>
+</body>
+</html>
