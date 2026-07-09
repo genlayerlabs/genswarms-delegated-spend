@@ -29,6 +29,9 @@ test("a launcher URL without go.html still lands on index.html", () => {
 test("a custom dappLinkPrefix replaces the MetaMask default", () => {
   const r = chooseRoute("Mozilla/5.0 (iPhone)", HREF, "https://go.cb-w.com/dapp?cb_url=");
   assert.ok(r.target.startsWith("https://go.cb-w.com/dapp?cb_url="));
+  const parsed = new URL(r.target);
+  assert.equal(parsed.searchParams.get("token"), null);
+  assert.equal(parsed.searchParams.get("cb_url"), "pay.example/wallet/index.html?order=ab&token=cd");
 });
 
 test("go.html uses a CSP-compatible external module", async () => {
