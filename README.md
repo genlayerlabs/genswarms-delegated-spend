@@ -1,10 +1,15 @@
 # genswarms-delegated-spend
 
-Wallet-native delegated spending for GenSwarms products (Base + USDC + Telegram
-+ deterministic Elixir object brain). Two lanes over one contract path:
+Wallet-native delegated spending plus generic wallet-order transport for
+GenSwarms products (Base + USDC + Telegram + deterministic Elixir object
+brain), behind one attested dapp and launcher. Delegated spend lanes still use
+the app's contract path; wallet-order transport lets the user's wallet verify
+and submit app-built payloads directly.
 
 - **Permit lane (M1):** one EIP-2612 signature per payment — gasless for the user.
 - **Delegation lane (M2):** ERC-7710 standing delegation with caveats — one-tap.
+- **Wallet-order transport (0.3):** `user_tx` order fetch + wallet submission,
+  and `bind` order fetch + connected-wallet POST.
 
 **Generic as a package, never generic as a deployed authority:** every consuming
 app deploys its own immutable `SpendRouter` subclass with exactly one typed
@@ -79,12 +84,14 @@ put an answer in an HTTP response; end-user authority there is the platform
 auth, not swarm identity.
 `DelegatedSpend.Keeper.Store` is the behaviour apps implement
 (`MemoryStore` is the reference semantics; production apps ship their own
-SQL adapter against it). `DelegatedSpend.Intake` ships PURE HTTP handlers (the app
-supplies serving + fail-closed bind): Telegram `initData` HMAC with
-freshness, `user_ref` derived only from verified identity, strict
-byte-for-byte grant validation against pinned config, per-user rate limits
-that only authenticated callers can even touch. `initData` is never logged;
-raw platform ids are never persisted.
+SQL adapter against it). `DelegatedSpend.Intake` ships PURE HTTP handlers (the
+app supplies serving + fail-closed bind): Telegram `initData` HMAC with
+freshness or ref-scoped access tokens, `user_ref` derived only from verified
+identity, strict byte-for-byte grant validation against pinned config, dapp
+build-version pinning, per-user rate limits that only authenticated callers
+can even touch, `handle_wallet/2` for bind orders, and `handle_submitted/2`
+for best-effort user-tx reports. `initData`, access tokens, and raw platform
+ids are never logged.
 
 ## Adopting (contracts layer)
 
