@@ -4,7 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runPermitFlow } from "../lib/flow.mjs";
+import { fetchOrder, runBindFlow, runPermitFlow, runUserTxFlow, walletDappLink } from "../lib/flow.mjs";
 import { buildGrantEnvelope } from "../lib/permit.mjs";
 
 const CONFIG = {
@@ -20,7 +20,7 @@ const CONFIG = {
 
 const ACCOUNT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 const SIG = "0x" + "11".repeat(32) + "22".repeat(32) + "1b";
-const ORDER = { order_ref: "oref-1", amount: 25_000_000, expires_at: 1_900_000_000 };
+const ORDER = { order_ref: "oref-1", kind: "permit", amount: 25_000_000, expires_at: 1_900_000_000, display: {} };
 
 function mockProvider(overrides = {}) {
   const calls = [];
@@ -50,7 +50,11 @@ function mockFetch(routes) {
   const fn = async (url, opts) => {
     const body = JSON.parse(opts.body);
     posts.push({ url, body });
-    const route = url.endsWith("/orders") ? routes.orders : routes.grants;
+    const route =
+      url.endsWith("/orders/submitted") ? routes.submitted :
+      url.endsWith("/orders") ? routes.orders :
+      url.endsWith("/wallet") ? routes.wallet :
+      routes.grants;
     const { status, json } = route(body);
     return { status, json: async () => json };
   };
@@ -73,9 +77,12 @@ test("happy path: connect → fetch → sign → submit; envelope is EXACTLY the
   assert.equal(result.status, "submitted");
 
   const grantPost = fetchFn.posts.find((p) => p.url.endsWith("/grants"));
+  const orderPost = fetchFn.posts.find((p) => p.url.endsWith("/orders"));
+  assert.equal(orderPost.body.v, CONFIG.version);
   assert.ok(grantPost, "grant POSTed");
   assert.equal(grantPost.body.init_data, "id-blob");
   assert.equal(grantPost.body.order_ref, "oref-1");
+  assert.equal(grantPost.body.v, CONFIG.version);
 
   const expectedEnvelope = buildGrantEnvelope({
     version: CONFIG.version,
@@ -196,4 +203,101 @@ test("typed keeper failure (expired) surfaces as the reason", async () => {
   });
   const result = await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1");
   assert.deepEqual(result, { ok: false, reason: "expired" });
+});
+
+test("fetchOrder sends token + v instead of init_data when token is present", async () => {
+  const bodies = [];
+  const fetchFn = mockFetch({
+    orders: (body) => {
+      bodies.push(body);
+      return { status: 200, json: ORDER };
+    },
+  });
+
+  await fetchOrder({ fetchFn, config: CONFIG, initData: "IGNORED", token: "tok" }, "oref-1");
+  assert.equal(bodies[0].token, "tok");
+  assert.equal(bodies[0].init_data, undefined);
+  assert.equal(bodies[0].v, CONFIG.version);
+});
+
+test("walletDappLink strips the scheme and prefixes the universal link", () => {
+  assert.equal(
+    walletDappLink("https://pay.example/wallet/index.html?order=ab&token=cd"),
+    "https://link.metamask.io/dapp/pay.example/wallet/index.html?order=ab&token=cd"
+  );
+  assert.ok(walletDappLink("https://x.example/i.html?a=1", "https://go.cb-w.com/dapp?cb_url=").startsWith("https://go.cb-w.com/dapp?cb_url="));
+});
+
+test("runUserTxFlow: connect → fetch → eth_sendTransaction → submitted report", async () => {
+  const sent = [];
+  const provider = mockProvider({
+    eth_sendTransaction: ({ params }) => {
+      sent.push(params[0]);
+      return "0x" + "ef".repeat(32);
+    },
+  });
+  const submitted = [];
+  const fetchFn = mockFetch({
+    orders: () => ({
+      status: 200,
+      json: {
+        order_ref: "r1",
+        kind: "user_tx",
+        amount: 0,
+        expires_at: 9_999_999_999,
+        tx: { to: "0x" + "11".repeat(20), data: "0xdeadbeef", value: 0 },
+        display: { summary_lines: ["Sell YES"] },
+      },
+    }),
+    submitted: (body) => {
+      submitted.push(body);
+      return { status: 200, json: { status: "noted" } };
+    },
+  });
+
+  const res = await runUserTxFlow({ provider, fetchFn, config: CONFIG, initData: "", token: "tok" }, "r1");
+  assert.equal(res.ok, true);
+  assert.equal(sent[0].to, "0x" + "11".repeat(20));
+  assert.equal(sent[0].data, "0xdeadbeef");
+  assert.equal(sent[0].from, ACCOUNT);
+  assert.equal(submitted[0].tx_hash, "0x" + "ef".repeat(32));
+  assert.equal(submitted[0].token, "tok");
+  assert.equal(submitted[0].v, CONFIG.version);
+});
+
+test("runUserTxFlow: user rejection is typed, no submitted report", async () => {
+  const provider = mockProvider({
+    eth_sendTransaction: () => {
+      const e = new Error("denied");
+      e.code = 4001;
+      throw e;
+    },
+  });
+  const fetchFn = mockFetch({
+    orders: () => ({
+      status: 200,
+      json: { order_ref: "r1", kind: "user_tx", amount: 0, expires_at: 9_999_999_999, tx: { to: "0x1", data: "0x", value: 0 }, display: {} },
+    }),
+  });
+
+  const res = await runUserTxFlow({ provider, fetchFn, config: CONFIG, initData: "", token: "t" }, "r1");
+  assert.deepEqual(res, { ok: false, reason: "user_rejected" });
+  assert.equal(fetchFn.posts.filter((p) => p.url.endsWith("/orders/submitted")).length, 0);
+});
+
+test("runBindFlow: connect → POST /wallet with connected address", async () => {
+  const posts = [];
+  const provider = mockProvider();
+  const fetchFn = mockFetch({
+    wallet: (body) => {
+      posts.push(body);
+      return { status: 200, json: { status: "bound", address: body.address } };
+    },
+  });
+
+  const res = await runBindFlow({ provider, fetchFn, config: CONFIG, initData: "", token: "t" }, "b1");
+  assert.equal(res.ok, true);
+  assert.equal(posts[0].address, ACCOUNT);
+  assert.equal(posts[0].bind_ref, "b1");
+  assert.equal(posts[0].v, CONFIG.version);
 });
