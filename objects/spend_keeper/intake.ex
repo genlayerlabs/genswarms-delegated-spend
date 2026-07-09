@@ -31,27 +31,31 @@ defmodule DelegatedSpend.Intake do
          :ok <- allow(ctx, user_ref) do
       case Keeper.fetch_order(ctx.keeper, order_ref, user_ref) do
         {:ok, view} ->
-          base = %{
-            "order_ref" => view.order_ref,
-            "kind" => view.kind,
-            "amount" => view.amount,
-            "expires_at" => view.expires_at,
-            "display" => stringify(view.display)
-          }
+          if expired_user_tx?(view) do
+            {410, %{"error" => "expired"}}
+          else
+            base = %{
+              "order_ref" => view.order_ref,
+              "kind" => view.kind,
+              "amount" => view.amount,
+              "expires_at" => view.expires_at,
+              "display" => stringify(view.display)
+            }
 
-          body =
-            case view.kind do
-              "user_tx" ->
-                Map.put(base, "tx", stringify(view.tx))
+            body =
+              case view.kind do
+                "user_tx" ->
+                  Map.put(base, "tx", stringify(view.tx))
 
-              "bind" ->
-                Map.put(base, "current_wallet", wallet_view(ctx, user_ref))
+                "bind" ->
+                  Map.put(base, "current_wallet", wallet_view(ctx, user_ref))
 
-              _ ->
-                base
-            end
+                _ ->
+                  base
+              end
 
-          {200, body}
+            {200, body}
+          end
 
         {:error, :not_found} ->
           {404, %{"error" => "not found"}}
@@ -170,6 +174,9 @@ defmodule DelegatedSpend.Intake do
       _ -> nil
     end
   end
+
+  defp expired_user_tx?(%{kind: "user_tx", expires_at: exp}), do: System.os_time(:second) > exp
+  defp expired_user_tx?(_view), do: false
 
   defp fetch_fn(ctx, key, arity) do
     case Map.get(ctx, key) do

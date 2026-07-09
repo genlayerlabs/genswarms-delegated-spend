@@ -552,6 +552,30 @@ defmodule DelegatedSpend.IntakeTest do
                Intake.handle_submitted(%{"order_ref" => ref, "token" => token, "tx_hash" => tx_hash, "v" => v}, ctx)
     end
 
+    test "expired user_tx order fetch is 410 and does not expose tx", %{ctx: ctx, store: store} do
+      v = ctx.pinned.version
+      expired_ref = String.duplicate("ab", 32)
+
+      :ok =
+        MemoryStore.put_order(store, %{
+          order_id: "0x" <> String.duplicate("bb", 32),
+          order_ref: expired_ref,
+          user_ref: "ref-#{@user_id}",
+          amount: 0,
+          action_args: [],
+          kind: "user_tx",
+          tx: %{to: "0x" <> String.duplicate("11", 20), data: "0x", value: 0},
+          display: %{},
+          expected_owner: nil,
+          expires_at: System.os_time(:second) - 5
+        })
+
+      token = DelegatedSpend.Intake.Token.mint("tsecret", expired_ref, "ref-#{@user_id}", future())
+
+      assert {410, %{"error" => "expired"}} =
+               Intake.handle_order(%{"order_ref" => expired_ref, "token" => token, "v" => v}, ctx)
+    end
+
     test "submitted-report remains best-effort when callback raises", %{ctx: ctx} do
       v = ctx.pinned.version
 
