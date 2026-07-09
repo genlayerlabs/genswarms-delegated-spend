@@ -57,8 +57,19 @@ defmodule DelegatedSpend.Intake.TokenTest do
     token = Token.mint(@secret, @ref, @user_ref, 2_000_000_000)
     assert {:error, :bad_token} = Token.verify("other-secret", @ref, token, 0)
 
-    for bad <- [nil, 42, "", "v1", "v2.1.2.3", "v1.x.y.z"] do
+    for bad <- [
+          nil,
+          42,
+          "",
+          "v1",
+          "v2.1.2.3",
+          "v1.x.y.z",
+          "v1.1.short",
+          "v1.1." <> String.duplicate("a", 65)
+        ] do
       assert {:error, :bad_token} = Token.verify(@secret, @ref, bad, 0)
     end
+
+    assert {:error, :bad_token} = Token.verify(:not_binary_secret, @ref, token, 0)
   end
 end
