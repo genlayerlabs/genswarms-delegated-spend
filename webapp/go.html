@@ -17,13 +17,6 @@
   <h1>Opening your wallet...</h1>
   <p><a id="open" class="button" href="#">Open in MetaMask</a></p>
   <p class="muted">Nothing happening? Tap the button. No MetaMask on this device? Open this chat on your phone and tap the chat button there.</p>
-  <script type="module">
-    import { chooseRoute, DEFAULT_DAPP_LINK_PREFIX } from "./lib/launch.mjs";
-    const config = await fetch("./config.json").then((r) => r.json()).catch(() => ({}));
-    const route = chooseRoute(navigator.userAgent, location.href, config.dappLinkPrefix || DEFAULT_DAPP_LINK_PREFIX);
-    document.getElementById("open").href = route.target;
-    if (route.mode === "desktop") location.replace(route.target);
-    else setTimeout(() => { location.href = route.target; }, 150);
-  </script>
+  <script type="module" src="./go.mjs"></script>
 </body>
 </html>

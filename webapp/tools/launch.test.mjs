@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { chooseRoute } from "../lib/launch.mjs";
 
 const HREF = "https://pay.example/wallet/go.html?order=ab&token=cd";
@@ -28,4 +29,11 @@ test("a launcher URL without go.html still lands on index.html", () => {
 test("a custom dappLinkPrefix replaces the MetaMask default", () => {
   const r = chooseRoute("Mozilla/5.0 (iPhone)", HREF, "https://go.cb-w.com/dapp?cb_url=");
   assert.ok(r.target.startsWith("https://go.cb-w.com/dapp?cb_url="));
+});
+
+test("go.html uses a CSP-compatible external module", async () => {
+  const html = await readFile(new URL("../go.html", import.meta.url), "utf8");
+  assert.match(html, /script-src 'self'/);
+  assert.match(html, /<script type="module" src="\.\/go\.mjs"><\/script>/);
+  assert.doesNotMatch(html, /<script type="module">\s*\n/);
 });
