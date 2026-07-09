@@ -38,6 +38,7 @@ export async function fetchOrder(deps, orderRef) {
   if (res.status === 404) return { ok: false, reason: "order_not_found" };
   if (res.status === 401) return { ok: false, reason: "unauthorized" };
   if (res.status === 409) return { ok: false, reason: "version_mismatch" };
+  if (res.status === 410) return { ok: false, reason: "expired" };
   if (res.status !== 200) return { ok: false, reason: `http_${res.status}` };
   return { ok: true, order: await res.json() };
 }

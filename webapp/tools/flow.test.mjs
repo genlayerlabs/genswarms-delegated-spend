@@ -195,6 +195,14 @@ test("401 from fetchOrder → unauthorized, nothing signed", async () => {
   assert.ok(!provider.calls.some((c) => c.method === "eth_signTypedData_v4"));
 });
 
+test("410 from fetchOrder → expired, nothing signed", async () => {
+  const provider = mockProvider();
+  const fetchFn = mockFetch({ ...happyRoutes, orders: () => ({ status: 410, json: { error: "expired" } }) });
+  const result = await runUserTxFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1");
+  assert.deepEqual(result, { ok: false, reason: "expired" });
+  assert.ok(!provider.calls.some((c) => c.method === "eth_sendTransaction"));
+});
+
 test("typed keeper failure (expired) surfaces as the reason", async () => {
   const provider = mockProvider();
   const fetchFn = mockFetch({
