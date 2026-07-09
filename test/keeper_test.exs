@@ -537,5 +537,18 @@ defmodule DelegatedSpend.KeeperTest do
       assert {:failed, :permit_lane_disabled} = Keeper.execute_with_permit(keeper, pref, "u-a", permit(5))
       assert {:ok, _} = Keeper.fetch_order(keeper, pref, "u-a")
     end
+
+    test "order_status is safe without a signer" do
+      store = MemoryStore.start()
+
+      {:ok, keeper} =
+        Keeper.start_link(%{
+          store: {MemoryStore, store},
+          source_allowlist: ["app"],
+          order_ttl_s: 900
+        })
+
+      assert :unknown = Keeper.order_status(keeper, "missing")
+    end
   end
 end

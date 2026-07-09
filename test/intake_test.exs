@@ -281,6 +281,150 @@ defmodule DelegatedSpend.IntakeTest do
     end
   end
 
+  describe "wallet bind + user_tx views" do
+    setup do
+      %{ctx: ctx} = c = start_stack()
+      me = self()
+
+      ctx =
+        ctx
+        |> Map.put(:token_secret, "tsecret")
+        |> Map.put(:wallet_fn, fn user_ref, addr, bind_ref ->
+          send(me, {:bound, user_ref, addr, bind_ref})
+          :ok
+        end)
+        |> Map.put(:wallet_view_fn, fn _user_ref -> "0xAbCd000000000000000000000000000000000001" end)
+        |> Map.put(:submitted_fn, fn order_id, tx ->
+          send(me, {:submitted, order_id, tx})
+          :ok
+        end)
+
+      {:ok, Map.put(c, :ctx, ctx)}
+    end
+
+    test "bind fetch returns kind+current_wallet; POST /wallet binds via wallet_fn single-use", %{ctx: ctx} do
+      {:ok, %{order_ref: bind_ref}} =
+        Keeper.register_order(ctx.keeper, "market_phase", %{
+          user_ref: "ref-#{@user_id}",
+          amount: 0,
+          action_args: [],
+          kind: "bind"
+        })
+
+      token = DelegatedSpend.Intake.Token.mint("tsecret", bind_ref, "ref-#{@user_id}", future())
+      v = ctx.pinned.version
+
+      assert {200, body} = Intake.handle_order(%{"order_ref" => bind_ref, "token" => token, "v" => v}, ctx)
+      assert body["kind"] == "bind"
+      assert body["current_wallet"] == "0xAbCd000000000000000000000000000000000001"
+
+      addr = "0x8ba1f109551bd432803012645ac136ddd64dba72"
+
+      assert {200, %{"status" => "bound", "address" => bound}} =
+               Intake.handle_wallet(%{"bind_ref" => bind_ref, "token" => token, "address" => addr, "v" => v}, ctx)
+
+      assert String.downcase(bound) == addr
+      user_ref = "ref-#{@user_id}"
+      assert_received {:bound, ^user_ref, ^bound, ^bind_ref}
+
+      assert {410, _} =
+               Intake.handle_wallet(%{"bind_ref" => bind_ref, "token" => token, "address" => addr, "v" => v}, ctx)
+    end
+
+    test "bad address is 422; wrong-kind ref is 422; missing wallet_fn is 503", %{ctx: ctx} do
+      v = ctx.pinned.version
+
+      {:ok, %{order_ref: bind_ref}} =
+        Keeper.register_order(ctx.keeper, "market_phase", %{
+          user_ref: "ref-#{@user_id}",
+          amount: 0,
+          action_args: [],
+          kind: "bind"
+        })
+
+      token = DelegatedSpend.Intake.Token.mint("tsecret", bind_ref, "ref-#{@user_id}", future())
+
+      assert {422, %{"field" => "address"}} =
+               Intake.handle_wallet(%{"bind_ref" => bind_ref, "token" => token, "address" => "nonsense", "v" => v}, ctx)
+
+      permit_ref = register(ctx.keeper, @user_id)
+      ptoken = DelegatedSpend.Intake.Token.mint("tsecret", permit_ref, "ref-#{@user_id}", future())
+
+      assert {422, %{"field" => "kind"}} =
+               Intake.handle_wallet(
+                 %{
+                   "bind_ref" => permit_ref,
+                   "token" => ptoken,
+                   "address" => "0x8ba1f109551bd432803012645ac136ddd64dba72",
+                   "v" => v
+                 },
+                 ctx
+               )
+
+      assert {503, %{"error" => "unavailable"}} =
+               Intake.handle_wallet(
+                 %{
+                   "bind_ref" => bind_ref,
+                   "token" => token,
+                   "address" => "0x8ba1f109551bd432803012645ac136ddd64dba72",
+                   "v" => v
+                 },
+                 Map.delete(ctx, :wallet_fn)
+               )
+    end
+
+    test "user_tx fetch carries tx + display; submitted-report is noted", %{ctx: ctx} do
+      v = ctx.pinned.version
+
+      {:ok, %{order_ref: ref}} =
+        Keeper.register_order(ctx.keeper, "market_phase", %{
+          user_ref: "ref-#{@user_id}",
+          amount: 0,
+          action_args: [],
+          kind: "user_tx",
+          tx: %{to: "0x" <> String.duplicate("11", 20), data: "0xdeadbeef", value: 0},
+          display: %{summary_lines: ["Sell YES"]}
+        })
+
+      token = DelegatedSpend.Intake.Token.mint("tsecret", ref, "ref-#{@user_id}", future())
+
+      assert {200, body} = Intake.handle_order(%{"order_ref" => ref, "token" => token, "v" => v}, ctx)
+      assert body["kind"] == "user_tx"
+      assert body["tx"]["data"] == "0xdeadbeef"
+      assert body["display"]["summary_lines"] == ["Sell YES"]
+
+      tx_hash = "0x" <> String.duplicate("ef", 32)
+
+      assert {200, %{"status" => "noted"}} =
+               Intake.handle_submitted(%{"order_ref" => ref, "token" => token, "tx_hash" => tx_hash, "v" => v}, ctx)
+
+      assert_received {:submitted, _order_id, ^tx_hash}
+
+      assert {422, %{"field" => "tx_hash"}} =
+               Intake.handle_submitted(%{"order_ref" => ref, "token" => token, "tx_hash" => "zzz", "v" => v}, ctx)
+    end
+
+    test "submitted-report remains best-effort when callback raises", %{ctx: ctx} do
+      v = ctx.pinned.version
+
+      {:ok, %{order_ref: ref}} =
+        Keeper.register_order(ctx.keeper, "market_phase", %{
+          user_ref: "ref-#{@user_id}",
+          amount: 0,
+          action_args: [],
+          kind: "user_tx",
+          tx: %{to: "0x" <> String.duplicate("11", 20), data: "0xdeadbeef", value: 0}
+        })
+
+      token = DelegatedSpend.Intake.Token.mint("tsecret", ref, "ref-#{@user_id}", future())
+      tx_hash = "0x" <> String.duplicate("ef", 32)
+      ctx = Map.put(ctx, :submitted_fn, fn _order_id, _tx -> raise "scanner offline" end)
+
+      assert {200, %{"status" => "noted"}} =
+               Intake.handle_submitted(%{"order_ref" => ref, "token" => token, "tx_hash" => tx_hash, "v" => v}, ctx)
+    end
+  end
+
   test "handle_grant is rate limited too (429 after the bucket is consumed)" do
     %{ctx: ctx, keeper: keeper} = start_stack(1)
     ref = register(keeper, @user_id)

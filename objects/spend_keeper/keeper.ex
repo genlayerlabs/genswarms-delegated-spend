@@ -49,6 +49,12 @@ defmodule DelegatedSpend.Keeper do
   def fetch_order(keeper, order_ref, user_ref),
     do: GenServer.call(keeper, {:fetch_order, order_ref, user_ref})
 
+  def fetch_order_full(keeper, order_ref, user_ref),
+    do: GenServer.call(keeper, {:fetch_order_full, order_ref, user_ref})
+
+  def consume_order(keeper, order_id, user_ref),
+    do: GenServer.call(keeper, {:consume_order, order_id, user_ref})
+
   def execute_with_permit(keeper, order_ref, user_ref, permit),
     do: GenServer.call(keeper, {:execute, order_ref, user_ref, permit}, 60_000)
 
@@ -146,6 +152,17 @@ defmodule DelegatedSpend.Keeper do
       order ->
         {:reply, {:ok, order_view(order)}, state}
     end
+  end
+
+  def handle_call({:fetch_order_full, order_ref, user_ref}, _from, state) do
+    case store(state).get_order_by_ref(store_ref(state), order_ref, user_ref) do
+      nil -> {:reply, {:error, :not_found}, state}
+      order -> {:reply, {:ok, order}, state}
+    end
+  end
+
+  def handle_call({:consume_order, order_id, user_ref}, _from, state) do
+    {:reply, store(state).consume_order(store_ref(state), order_id, user_ref), state}
   end
 
   def handle_call({:execute, order_ref, user_ref, permit}, _from, state) do
@@ -273,6 +290,10 @@ defmodule DelegatedSpend.Keeper do
   # ── result delivery ───────────────────────────────────────────────────────
 
   defp do_sweep(state) do
+    if is_nil(state.signer), do: state, else: do_sweep_with_signer(state)
+  end
+
+  defp do_sweep_with_signer(state) do
     Enum.reduce(store(state).list_inflight(store_ref(state)), state, fn row, acc ->
       case Signer.status(acc.signer, row.action_key) do
         {:mined, hash} -> settle(acc, row.order_id, {:credited, hash})
@@ -315,11 +336,15 @@ defmodule DelegatedSpend.Keeper do
     do: Map.get(state.reverts, user_ref, 0) >= state.max_reverts
 
   defp pending_status(order_id, state) do
-    case Signer.status(state.signer, order_id) do
-      {:pending, hash} -> {:submitted, hash}
-      {:mined, hash} -> {:credited, hash}
-      {:failed, _} -> {:failed, :reverted}
-      :unknown -> :unknown
+    if is_nil(state.signer) do
+      :unknown
+    else
+      case Signer.status(state.signer, order_id) do
+        {:pending, hash} -> {:submitted, hash}
+        {:mined, hash} -> {:credited, hash}
+        {:failed, _} -> {:failed, :reverted}
+        :unknown -> :unknown
+      end
     end
   end
 

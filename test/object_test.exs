@@ -96,6 +96,30 @@ defmodule DelegatedSpend.Keeper.ObjectTest do
     assert byte_size(a) == 32 and byte_size(b) == 32 and is_binary(b)
   end
 
+  test "register via the door: transport order fields pass through" do
+    %{state: state, opts: opts} = start_object()
+
+    payload =
+      register_payload(%{
+        "amount" => 0,
+        "action_args" => [],
+        "kind" => "user_tx",
+        "tx" => %{"to" => "0x" <> String.duplicate("11", 20), "data" => "0xdeadbeef", "value" => 0},
+        "display" => %{"summary_lines" => ["Sell YES"]},
+        "ttl_s" => 60
+      })
+
+    {%{"ok" => true}, _} = msg(state, :market_phase, payload)
+
+    {MemoryStore, store} = opts.store
+    order = MemoryStore.get_order_by_ref(store, @ref, "u-a")
+    assert order.kind == "user_tx"
+    assert order.tx.data == "0xdeadbeef"
+    assert order.display["summary_lines"] == ["Sell YES"]
+    assert is_nil(order.display[:summary_lines])
+    assert_in_delta order.expires_at, System.os_time(:second) + 60, 5
+  end
+
   test "register via the door: unlisted from is refused; payload-claimed source is inert" do
     %{state: state} = start_object()
 

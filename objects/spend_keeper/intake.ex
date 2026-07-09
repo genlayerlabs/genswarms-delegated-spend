@@ -31,12 +31,27 @@ defmodule DelegatedSpend.Intake do
          :ok <- allow(ctx, user_ref) do
       case Keeper.fetch_order(ctx.keeper, order_ref, user_ref) do
         {:ok, view} ->
-          {200,
-           %{
-             "order_ref" => view.order_ref,
-             "amount" => view.amount,
-             "expires_at" => view.expires_at
-           }}
+          base = %{
+            "order_ref" => view.order_ref,
+            "kind" => view.kind,
+            "amount" => view.amount,
+            "expires_at" => view.expires_at,
+            "display" => stringify(view.display)
+          }
+
+          body =
+            case view.kind do
+              "user_tx" ->
+                Map.put(base, "tx", stringify(view.tx))
+
+              "bind" ->
+                Map.put(base, "current_wallet", wallet_view(ctx, user_ref))
+
+              _ ->
+                base
+            end
+
+          {200, body}
 
         {:error, :not_found} ->
           {404, %{"error" => "not found"}}
@@ -79,6 +94,46 @@ defmodule DelegatedSpend.Intake do
     end
   end
 
+  @doc "POST /wallet — bind a connected wallet address through a bind order."
+  def handle_wallet(params, ctx) when is_map(params) do
+    bind_ref = to_string(params["bind_ref"] || "")
+
+    with :ok <- pin_version(params, ctx),
+         {:ok, user_ref} <- authenticate(params, ctx, bind_ref),
+         :ok <- allow(ctx, user_ref),
+         {:ok, wallet_fn} <- fetch_fn(ctx, :wallet_fn),
+         {:ok, address} <- checksum_address(params["address"]),
+         {:ok, order} <- fetch_kind(ctx, bind_ref, user_ref, "bind"),
+         {:ok, _order} <- consume(ctx, order, user_ref) do
+      case wallet_fn.(user_ref, address, bind_ref) do
+        :ok -> {200, %{"status" => "bound", "address" => address}}
+        {:error, _reason} -> {422, %{"error" => "bind rejected"}}
+      end
+    else
+      {:error, status, body} -> {status, body}
+    end
+  end
+
+  @doc "POST /orders/submitted — best-effort user_tx hash report; watcher credits."
+  def handle_submitted(params, ctx) when is_map(params) do
+    order_ref = to_string(params["order_ref"] || "")
+
+    with :ok <- pin_version(params, ctx),
+         {:ok, user_ref} <- authenticate(params, ctx, order_ref),
+         :ok <- allow(ctx, user_ref),
+         {:ok, tx_hash} <- tx_hash(params["tx_hash"]),
+         {:ok, order} <- fetch_kind(ctx, order_ref, user_ref, "user_tx") do
+      case Map.get(ctx, :submitted_fn) do
+        fun when is_function(fun, 2) -> safe_submitted(fun, order.order_id, tx_hash)
+        _ -> :ok
+      end
+
+      {200, %{"status" => "noted"}}
+    else
+      {:error, status, body} -> {status, body}
+    end
+  end
+
   # ── auth + rate ────────────────────────────────────────────────────────────
 
   defp authenticate(params, ctx, ref) do
@@ -108,6 +163,75 @@ defmodule DelegatedSpend.Intake do
   end
 
   defp pin_version(_params, _ctx), do: :ok
+
+  defp wallet_view(ctx, user_ref) do
+    case Map.get(ctx, :wallet_view_fn) do
+      fun when is_function(fun, 1) -> fun.(user_ref)
+      _ -> nil
+    end
+  end
+
+  defp fetch_fn(ctx, key) do
+    case Map.get(ctx, key) do
+      fun when is_function(fun) -> {:ok, fun}
+      _ -> {:error, 503, %{"error" => "unavailable"}}
+    end
+  end
+
+  defp fetch_kind(ctx, ref, user_ref, kind) do
+    case Keeper.fetch_order_full(ctx.keeper, ref, user_ref) do
+      {:error, :not_found} ->
+        {:error, 404, %{"error" => "not found"}}
+
+      {:ok, %{kind: ^kind} = order} ->
+        if System.os_time(:second) > order.expires_at,
+          do: {:error, 410, %{"error" => "expired"}},
+          else: {:ok, order}
+
+      {:ok, _wrong_kind} ->
+        {:error, 422, %{"error" => "invalid", "field" => "kind"}}
+    end
+  end
+
+  defp consume(ctx, order, user_ref) do
+    case Keeper.consume_order(ctx.keeper, order.order_id, user_ref) do
+      {:ok, order} -> {:ok, order}
+      :already_consumed -> {:error, 410, %{"error" => "expired"}}
+      :not_found -> {:error, 404, %{"error" => "not found"}}
+    end
+  end
+
+  defp checksum_address(addr) when is_binary(addr) do
+    bytes = DelegatedSpend.Evm.Address.to_bytes(String.trim(addr))
+
+    if byte_size(bytes) == 20 and bytes != <<0::160>>,
+      do: {:ok, DelegatedSpend.Evm.Address.checksum(bytes)},
+      else: {:error, 422, %{"error" => "invalid", "field" => "address"}}
+  rescue
+    _ -> {:error, 422, %{"error" => "invalid", "field" => "address"}}
+  end
+
+  defp checksum_address(_), do: {:error, 422, %{"error" => "invalid", "field" => "address"}}
+
+  defp tx_hash("0x" <> hex = h) when byte_size(hex) == 64 do
+    if Regex.match?(~r/^[0-9a-fA-F]+$/, hex),
+      do: {:ok, h},
+      else: {:error, 422, %{"error" => "invalid", "field" => "tx_hash"}}
+  end
+
+  defp tx_hash(_), do: {:error, 422, %{"error" => "invalid", "field" => "tx_hash"}}
+
+  defp safe_submitted(fun, order_id, tx_hash) do
+    fun.(order_id, tx_hash)
+  rescue
+    _ -> :ok
+  end
+
+  defp stringify(map) when is_map(map),
+    do: Map.new(map, fn {k, v} -> {to_string(k), stringify(v)} end)
+
+  defp stringify(list) when is_list(list), do: Enum.map(list, &stringify/1)
+  defp stringify(other), do: other
 
   defp allow(%{rate: {limiter, max}}, user_ref) do
     if Rate.allow?(limiter, user_ref, max),
