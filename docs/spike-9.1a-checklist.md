@@ -42,6 +42,13 @@ Mini App core is transport-agnostic and fully tested against a mock
 provider + the golden-vector cross-check; this checklist is the remaining
 gate before announcing the fast lane to users.
 
+**Plan 1 / 0.3.0 hop status:** BLOCKED as of 2026-07-09. Repo and `.context`
+contain no recorded iPhone + Android PASS evidence for Telegram chat button
+→ `https://link.metamask.io/dapp/<host>/spike/hop-probe.html?order=probe123&token=tok456`
+→ MetaMask dapp browser with query params intact, provider injected, and
+typed-data signature working. Record the exact iPhone + Android device
+results here before Tasks 1-7.
+
 **M2 note:** when the account is 7702-upgraded, USDC validates permits via
 ERC-1271 (SignatureChecker branches on `isContract(owner)`); vectors for the
 upgraded state are fork-test material, deliberately not faked hermetically.
