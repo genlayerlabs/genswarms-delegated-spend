@@ -20,7 +20,7 @@ async function main() {
   const tg = globalThis.Telegram && globalThis.Telegram.WebApp;
   const initData = tg ? tg.initData : "";
   const params = new URLSearchParams(location.search);
-  const orderRef = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || params.get("order");
+  const orderRef = entryRef(tg, params);
   const token = params.get("token") || "";
 
   const config = await (await fetch("./config.json")).json();
@@ -133,4 +133,8 @@ function summaryLines(order) {
   return Array.isArray(lines) && lines.length ? lines.join("\n") : "Review this transaction in your wallet.";
 }
 
-main();
+export function entryRef(tg, params) {
+  return (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || params.get("order") || params.get("bind");
+}
+
+if (typeof document !== "undefined") main();

@@ -475,6 +475,20 @@ defmodule DelegatedSpend.KeeperTest do
       assert {:error, :bad_tx} = Keeper.register_order(keeper, "market_phase", req)
     end
 
+    test "user_tx registration without non-negative integer value is refused" do
+      %{keeper: keeper} = start_stack()
+
+      for tx <- [
+            %{to: "0x" <> String.duplicate("11", 20), data: "0xdeadbeef"},
+            %{to: "0x" <> String.duplicate("11", 20), data: "0xdeadbeef", value: "0x0"},
+            %{to: "0x" <> String.duplicate("11", 20), data: "0xdeadbeef", value: -1},
+            %{to: "0x" <> String.duplicate("11", 20), data: "0xdeadbeef", value: 9_007_199_254_740_992}
+          ] do
+        req = %{user_ref: "u-a", amount: 0, action_args: [], kind: "user_tx", tx: tx}
+        assert {:error, :bad_tx} = Keeper.register_order(keeper, "market_phase", req)
+      end
+    end
+
     test "bind order registers and fetches; permit orders default kind" do
       %{keeper: keeper} = start_stack()
 

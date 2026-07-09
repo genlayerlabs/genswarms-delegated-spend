@@ -101,7 +101,7 @@ defmodule DelegatedSpend.Intake do
     with :ok <- pin_version(params, ctx),
          {:ok, user_ref} <- authenticate(params, ctx, bind_ref),
          :ok <- allow(ctx, user_ref),
-         {:ok, wallet_fn} <- fetch_fn(ctx, :wallet_fn),
+         {:ok, wallet_fn} <- fetch_fn(ctx, :wallet_fn, 3),
          {:ok, address} <- checksum_address(params["address"]),
          {:ok, order} <- fetch_kind(ctx, bind_ref, user_ref, "bind"),
          {:ok, _order} <- consume(ctx, order, user_ref) do
@@ -171,9 +171,9 @@ defmodule DelegatedSpend.Intake do
     end
   end
 
-  defp fetch_fn(ctx, key) do
+  defp fetch_fn(ctx, key, arity) do
     case Map.get(ctx, key) do
-      fun when is_function(fun) -> {:ok, fun}
+      fun when is_function(fun, arity) -> {:ok, fun}
       _ -> {:error, 503, %{"error" => "unavailable"}}
     end
   end

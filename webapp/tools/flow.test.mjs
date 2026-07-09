@@ -225,7 +225,10 @@ test("walletDappLink strips the scheme and prefixes the universal link", () => {
     walletDappLink("https://pay.example/wallet/index.html?order=ab&token=cd"),
     "https://link.metamask.io/dapp/pay.example/wallet/index.html?order=ab&token=cd"
   );
-  assert.ok(walletDappLink("https://x.example/i.html?a=1", "https://go.cb-w.com/dapp?cb_url=").startsWith("https://go.cb-w.com/dapp?cb_url="));
+  const custom = walletDappLink("https://x.example/i.html?a=1&token=t", "https://go.cb-w.com/dapp?cb_url=");
+  const parsed = new URL(custom);
+  assert.equal(parsed.searchParams.get("token"), null);
+  assert.equal(parsed.searchParams.get("cb_url"), "x.example/i.html?a=1&token=t");
 });
 
 test("runUserTxFlow: connect → fetch → eth_sendTransaction → submitted report", async () => {
@@ -248,7 +251,7 @@ test("runUserTxFlow: connect → fetch → eth_sendTransaction → submitted rep
         tx: {
           to: "0x" + "11".repeat(20),
           data: "0xdeadbeef",
-          value: "0x20000000000001",
+          value: 9,
           gas: "0x5208",
           maxFeePerGas: "0x59682f00",
           maxPriorityFeePerGas: "0x3b9aca00",
@@ -267,7 +270,7 @@ test("runUserTxFlow: connect → fetch → eth_sendTransaction → submitted rep
   assert.equal(res.ok, true);
   assert.equal(sent[0].to, "0x" + "11".repeat(20));
   assert.equal(sent[0].data, "0xdeadbeef");
-  assert.equal(sent[0].value, "0x20000000000001");
+  assert.equal(sent[0].value, "0x9");
   assert.equal(sent[0].gas, "0x5208");
   assert.equal(sent[0].maxFeePerGas, "0x59682f00");
   assert.equal(sent[0].maxPriorityFeePerGas, "0x3b9aca00");
@@ -295,6 +298,34 @@ test("runUserTxFlow: user rejection is typed, no submitted report", async () => 
 
   const res = await runUserTxFlow({ provider, fetchFn, config: CONFIG, initData: "", token: "t" }, "r1");
   assert.deepEqual(res, { ok: false, reason: "user_rejected" });
+  assert.equal(fetchFn.posts.filter((p) => p.url.endsWith("/orders/submitted")).length, 0);
+});
+
+test("runUserTxFlow: unsafe numeric value is refused before wallet submission", async () => {
+  let sendCalls = 0;
+  const provider = mockProvider({
+    eth_sendTransaction: () => {
+      sendCalls += 1;
+      return "0x" + "ef".repeat(32);
+    },
+  });
+  const fetchFn = mockFetch({
+    orders: () => ({
+      status: 200,
+      json: {
+        order_ref: "r1",
+        kind: "user_tx",
+        amount: 0,
+        expires_at: 9_999_999_999,
+        tx: { to: "0x1", data: "0x", value: Number.MAX_SAFE_INTEGER + 1 },
+        display: {},
+      },
+    }),
+  });
+
+  const res = await runUserTxFlow({ provider, fetchFn, config: CONFIG, initData: "", token: "t" }, "r1");
+  assert.deepEqual(res, { ok: false, reason: "send_failed" });
+  assert.equal(sendCalls, 0);
   assert.equal(fetchFn.posts.filter((p) => p.url.endsWith("/orders/submitted")).length, 0);
 });
 

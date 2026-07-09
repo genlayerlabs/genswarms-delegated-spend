@@ -30,6 +30,7 @@ defmodule DelegatedSpend.Keeper do
   alias DelegatedSpend.Keeper.{PermitLane, Signer}
 
   @enforce_opts [:store, :source_allowlist, :order_ttl_s]
+  @max_json_safe_integer 9_007_199_254_740_991
 
   # Optional :name registers the server (supervision-friendly: a restarted
   # keeper is reachable at the same name, so app ctx never holds a stale pid).
@@ -358,8 +359,13 @@ defmodule DelegatedSpend.Keeper do
 
       "user_tx" ->
         case Map.get(req, :tx) do
-          %{to: to, data: data} when is_binary(to) and is_binary(data) -> {:ok, "user_tx"}
-          _ -> {:error, :bad_tx}
+          %{to: to, data: data, value: value}
+          when is_binary(to) and is_binary(data) and is_integer(value) and value >= 0 and
+                 value <= @max_json_safe_integer ->
+            {:ok, "user_tx"}
+
+          _ ->
+            {:error, :bad_tx}
         end
 
       _ ->

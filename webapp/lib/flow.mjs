@@ -24,7 +24,8 @@ function authBody(deps, extra) {
 }
 
 export function walletDappLink(href, prefix = "https://link.metamask.io/dapp/") {
-  return prefix + href.replace(/^https?:\/\//, "");
+  const noScheme = href.replace(/^https?:\/\//, "");
+  return prefix + (prefix.includes("?") ? encodeURIComponent(noScheme) : noScheme);
 }
 
 export async function fetchOrder(deps, orderRef) {
@@ -136,7 +137,7 @@ export async function runUserTxFlow(deps, orderRef) {
   try {
     tx = await deps.provider.request({
       method: "eth_sendTransaction",
-      params: [{ ...fetched.order.tx, from: conn.account }],
+      params: [{ ...fetched.order.tx, from: conn.account, value: hexQuantity(fetched.order.tx.value) }],
     });
   } catch (e) {
     if (e && e.code === 4001) return { ok: false, reason: "user_rejected" };
@@ -152,6 +153,12 @@ export async function runUserTxFlow(deps, orderRef) {
   } catch (_) {}
 
   return { ok: true, tx, order: fetched.order };
+}
+
+function hexQuantity(value) {
+  if (typeof value === "string" && /^0x[0-9a-fA-F]+$/.test(value)) return value;
+  if (Number.isSafeInteger(value) && value >= 0) return "0x" + value.toString(16);
+  throw new Error("bad quantity");
 }
 
 export async function runBindFlow(deps, bindRef) {

@@ -432,6 +432,17 @@ defmodule DelegatedSpend.IntakeTest do
                  },
                  Map.delete(ctx, :wallet_fn)
                )
+
+      assert {503, %{"error" => "unavailable"}} =
+               Intake.handle_wallet(
+                 %{
+                   "bind_ref" => bind_ref,
+                   "token" => token,
+                   "address" => "0x8ba1f109551bd432803012645ac136ddd64dba72",
+                   "v" => v
+                 },
+                 Map.put(ctx, :wallet_fn, fn _user_ref, _address -> :ok end)
+               )
     end
 
     test "bind fetch can omit current_wallet and wallet_fn rejection is surfaced", %{ctx: ctx} do
