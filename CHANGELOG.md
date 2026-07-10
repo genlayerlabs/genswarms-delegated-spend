@@ -19,6 +19,18 @@ package releases can ship zero contract bytecode changes. `scripts/check-version
   introspection view and the keeper's grant registry stores delegation
   grants, but no redemption path exists yet.
 
+## [0.3.2] - 2026-07-10
+
+Copy release: the wallet dapp speaks bridge, not lanes.
+
+### Changed
+
+- Dapp footer copy is order-kind-neutral ("you authorize exactly what is
+  shown — one signature, one action") instead of naming the delegated-spend
+  lane; it holds for `permit`, `user_tx`, and `bind` orders alike.
+- Manual-transfer panel copy says the funds "credit the same order" —
+  consumer-neutral wording (no product vocabulary in package copy).
+
 ## [0.3.1] - 2026-07-10
 
 Rename release: the package and repository are now **`genswarms-wallet-bridge`**.
