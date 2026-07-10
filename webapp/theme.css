@@ -1,0 +1,68 @@
+/* Theme seam: every deployment-facing look decision routes through the
+ * custom properties below. This file ships the NEUTRAL DEFAULT — it
+ * reproduces the stock light, system-font look, so the package alone is
+ * visually unchanged. Consumers reskin by overlaying their own theme.css
+ * (same variables, plus any extra rules) over this path; markup, element
+ * ids, copy, and scripts never change.
+ *
+ * Supply-chain posture holds: the CSP admits only same-origin styles and
+ * fonts (style-src/font-src 'self') — themes must self-host any webfonts.
+ */
+
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --fg: #111111;
+  --muted: #777777;
+  --accent: #e9e9ed;    /* primary action face (native-like light gray) */
+  --accent-fg: #111111; /* text on --accent */
+  --danger: #b00020;    /* reserved for themes: failure/expired status */
+  --border: #cccccc;
+  --font-display: -apple-system, system-ui, sans-serif;
+  --font-body: -apple-system, system-ui, sans-serif;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+}
+
+h1 {
+  font-family: var(--font-display);
+  color: var(--fg);
+}
+
+button#pay {
+  font-family: var(--font-body);
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+button#pay:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+a.button,
+#open-wallet {
+  font-family: var(--font-body);
+  color: var(--fg);
+  background: transparent;
+  border-color: var(--border);
+}
+
+#status {
+  color: var(--fg);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+#manual code {
+  color: var(--fg);
+}

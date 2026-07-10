@@ -19,6 +19,33 @@ package releases can ship zero contract bytecode changes. `scripts/check-version
   introspection view and the keeper's grant registry stores delegation
   grants, but no redemption path exists yet.
 
+## [0.3.1] - 2026-07-10
+
+Webapp theming seam: the static dapp becomes reskinnable by overlaying one
+CSS file and one config field — markup, element ids, user-facing copy, and
+scripts stay fixed. No contract changes (`CONTRACT_VERSION` stays `0.2.0`).
+
+### Added
+
+- `webapp/theme.css`: neutral default theme expressed through CSS custom
+  properties on `:root` (`--bg`, `--fg`, `--muted`, `--accent`,
+  `--accent-fg`, `--danger`, `--border`, `--font-display`, `--font-body`).
+  Both pages link it after their inline base styles; the shipped defaults
+  reproduce the stock light, system-font look, so the package alone is
+  visually unchanged. Deployments overlay this one file to reskin.
+- Optional `config.productName`: when present it renders into `<title>` and
+  `<h1>` on both pages (`webapp/lib/brand.mjs`); absent, the built-in
+  "Fast payments" / "Opening your wallet..." strings stay.
+- Neutral `webapp/favicon.svg` plus `<link rel="icon">` on both pages.
+
+### Changed
+
+- CSP on both pages: `style-src` gains `'self'` (for `theme.css`) and
+  `font-src 'self'` is added (themes may self-host fonts). Still fully
+  static, zero external hosts.
+- Package version stamps move to `0.3.1`; permit golden vectors regenerated
+  for the version stamp only (signatures unchanged).
+
 ## [0.3.0] - 2026-07-09
 
 Wallet dapp consolidation release: permit remains the delegated-spend lane,

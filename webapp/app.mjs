@@ -2,6 +2,7 @@
 // (tested headlessly); this file only wires optional Telegram initData,
 // the injected EIP-1193 provider, and the DOM elements.
 
+import { applyProductName } from "./lib/brand.mjs";
 import { connectWallet, fetchOrder, fetchPermitNonce, runBindFlow, runUserTxFlow, signAndSubmit, walletDappLink } from "./lib/flow.mjs";
 
 const $ = (id) => document.getElementById(id);
@@ -24,6 +25,7 @@ async function main() {
   const token = params.get("token") || "";
 
   const config = await (await fetch("./config.json")).json();
+  applyProductName(document, config);
   const provider = globalThis.ethereum;
 
   if (!provider) {
