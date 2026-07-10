@@ -11,17 +11,6 @@ package releases can ship zero contract bytecode changes. `scripts/check-version
 
 ## [Unreleased]
 
-### Changed
-
-- **Renamed the package and repository to `genswarms-wallet-bridge`** (formerly
-  `genswarms-delegated-spend`): since 0.3.0 the surface is wider than delegated
-  spend — generic wallet-order transport (`user_tx`/`bind`) plus the attested
-  wallet dapp and launcher. Notary identity moves to
-  `genlayerlabs/genswarms-wallet-bridge` from the next published version;
-  releases through 0.3.0 remain on the old swarmidx name. Code identities are
-  unchanged: the OTP app stays `:genswarms_delegated_spend` and the keeper's
-  swarm-object module stays `DelegatedSpend.Keeper.Object`.
-
 ### Planned
 
 - **M2 — delegation lane (ERC-7710):** standing delegation with caveats,
@@ -29,6 +18,25 @@ package releases can ship zero contract bytecode changes. `scripts/check-version
   router path. The base contract already carries the `delegationManager`
   introspection view and the keeper's grant registry stores delegation
   grants, but no redemption path exists yet.
+
+## [0.3.1] - 2026-07-10
+
+Rename release: the package and repository are now **`genswarms-wallet-bridge`**.
+No contract or code-identity changes.
+
+### Changed
+
+- **Renamed the package and repository to `genswarms-wallet-bridge`** (formerly
+  `genswarms-delegated-spend`): since 0.3.0 the surface is wider than delegated
+  spend — generic wallet-order transport (`user_tx`/`bind`) plus the attested
+  wallet dapp and launcher. The swarmidx identity is
+  `genlayerlabs/genswarms-wallet-bridge` from this release; releases through
+  0.3.0 remain on the old notary name. Code identities are unchanged: the OTP
+  app stays `:genswarms_delegated_spend` and the keeper's swarm-object module
+  stays `DelegatedSpend.Keeper.Object`, so consumers' path deps and swarm
+  handler wiring keep working unmodified.
+- Webapp failure copy is consumer-neutral: no chat-transfer-fallback promise
+  the package cannot keep on behalf of the adopting app.
 
 ## [0.3.0] - 2026-07-09
 
