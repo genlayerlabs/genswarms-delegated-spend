@@ -1,4 +1,4 @@
-# genswarms-delegated-spend contract core. solc pinned to 0.8.20 so the package
+# genswarms-wallet-bridge contract core. solc pinned to 0.8.20 so the package
 # compiles unchanged as a Foundry lib inside consumers that pin 0.8.20.
 [profile.default]
 src = "src"

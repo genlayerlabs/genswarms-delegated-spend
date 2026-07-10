@@ -1,4 +1,4 @@
-// genswarms-delegated-spend wallet dapp — permit encoding (THE encoding code).
+// genswarms-wallet-bridge wallet dapp — permit encoding (THE encoding code).
 // Golden-vector discipline (spec §6.2/§8): vectors/permit/*.json are generated
 // by THESE functions; Foundry redeems them and the Elixir keeper parses them.
 // Change anything here and the cross-check fails until all three agree.
