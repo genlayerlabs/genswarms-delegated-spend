@@ -23,7 +23,11 @@ defmodule GenswarmsDelegatedSpend.MixProject do
     [
       {:ex_abi, "~> 0.8"},
       {:ex_rlp, "~> 0.6"},
-      {:jason, "~> 1.4"}
+      {:jason, "~> 1.4"},
+      # The package stays runtime-independent from genswarms; this test-only
+      # dependency verifies its structural ObjectHandler contract at the real
+      # ObjectServer boundary.
+      {:genswarms, github: "genlayerlabs/genswarms", only: :test}
     ]
   end
 end
