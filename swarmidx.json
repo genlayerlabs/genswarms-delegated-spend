@@ -4,10 +4,10 @@
   },
   "packages": [
     {
-      "name": "genswarms-delegated-spend",
+      "name": "genswarms-wallet-bridge",
       "dir": ".",
       "kind": "handler",
-      "description": "Wallet-native delegated spending: immutable SpendRouter contract base + gasless permit-lane keeper (swarm object) + wallet dapp intake",
+      "description": "Chat-to-wallet bridge: delegated spend lanes (immutable SpendRouter contract base + gasless permit-lane keeper swarm object) plus generic wallet-order transport (user_tx/bind) behind one attested wallet dapp and launcher",
       "module": "DelegatedSpend.Keeper.Object",
       "deps": [],
       "note": "module is the keeper's swarm-object door (async registration, framework-stamped source identity); the intake HTTP path stays a synchronous call into the same core. Contracts (Foundry) and the wallet dapp travel in-repo; consumers deploy their own SpendRouter subclass — no shared deployed contracts."

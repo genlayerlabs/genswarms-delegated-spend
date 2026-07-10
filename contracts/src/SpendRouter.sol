@@ -22,7 +22,7 @@ interface IERC20PermitMinimal {
 }
 
 /// @notice Abstract non-custodial spend router — the audited core of
-///         genswarms-delegated-spend.
+///         genswarms-wallet-bridge.
 ///
 /// A concrete router adds exactly ONE typed money-moving action (plus its
 /// `...WithPermit` variant) and derives the funds destination through a

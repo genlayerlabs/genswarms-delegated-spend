@@ -1,4 +1,4 @@
-# Adopting genswarms-delegated-spend
+# Adopting genswarms-wallet-bridge
 
 This guide walks the **five-item adoption contract** (design spec §3.2): what
 a consuming app supplies to run the permit lane on its own authority. The

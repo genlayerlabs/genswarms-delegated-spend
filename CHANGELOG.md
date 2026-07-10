@@ -11,6 +11,17 @@ package releases can ship zero contract bytecode changes. `scripts/check-version
 
 ## [Unreleased]
 
+### Changed
+
+- **Renamed the package and repository to `genswarms-wallet-bridge`** (formerly
+  `genswarms-delegated-spend`): since 0.3.0 the surface is wider than delegated
+  spend — generic wallet-order transport (`user_tx`/`bind`) plus the attested
+  wallet dapp and launcher. Notary identity moves to
+  `genlayerlabs/genswarms-wallet-bridge` from the next published version;
+  releases through 0.3.0 remain on the old swarmidx name. Code identities are
+  unchanged: the OTP app stays `:genswarms_delegated_spend` and the keeper's
+  swarm-object module stays `DelegatedSpend.Keeper.Object`.
+
 ### Planned
 
 - **M2 — delegation lane (ERC-7710):** standing delegation with caveats,
