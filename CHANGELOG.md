@@ -27,12 +27,20 @@ scripts stay fixed. No contract changes (`CONTRACT_VERSION` stays `0.2.0`).
 
 ### Added
 
-- `webapp/theme.css`: neutral default theme expressed through CSS custom
-  properties on `:root` (`--bg`, `--fg`, `--muted`, `--accent`,
-  `--accent-fg`, `--danger`, `--border`, `--font-display`, `--font-body`).
-  Both pages link it after their inline base styles; the shipped defaults
-  reproduce the stock light, system-font look, so the package alone is
-  visually unchanged. Deployments overlay this one file to reskin.
+- `webapp/theme.css`: the theming seam — both pages link it after their
+  inline base styles, and deployments overlay this ONE file to reskin
+  (an overlay replaces the file, it does not cascade after it, so a theme
+  must be self-contained). The shipped default is contract-only: it
+  declares the `:root` custom-property contract (`--bg`, `--fg`,
+  `--muted`, `--accent`, `--accent-fg`, `--danger`, `--border`,
+  `--font-display`, `--font-body`) and no element rules, so the package
+  alone keeps the stock light, system-font look pixel-for-pixel.
+- Outcome state stamps for themes: terminal outcomes set
+  `data-state="error"` / `data-state="success"` on `#status` (cleared
+  while progress text shows), and `#summary` carries `data-state="error"`
+  when the order fails to load (expired / not found / stale build /
+  unauthorized). The default theme leaves every state unstyled; user-facing
+  copy is unchanged.
 - Optional `config.productName`: when present it renders into `<title>` and
   `<h1>` on both pages (`webapp/lib/brand.mjs`); absent, the built-in
   "Fast payments" / "Opening your wallet..." strings stay.
@@ -41,8 +49,13 @@ scripts stay fixed. No contract changes (`CONTRACT_VERSION` stays `0.2.0`).
 ### Changed
 
 - CSP on both pages: `style-src` gains `'self'` (for `theme.css`) and
-  `font-src 'self'` is added (themes may self-host fonts). Still fully
-  static, zero external hosts.
+  `font-src 'self'` is added (themes may self-host fonts); `go.html`
+  additionally gains `img-src 'self' data:` (matching `index.html`) so the
+  favicon and any theme-injected imagery render on the hop page instead of
+  logging CSP violations. Still fully static, zero external hosts.
+- The `#pay` button is hidden in states it can never serve: no injected
+  wallet provider, and a failed order load. Element ids and copy stay
+  fixed.
 - Package version stamps move to `0.3.1`; permit golden vectors regenerated
   for the version stamp only (signatures unchanged).
 

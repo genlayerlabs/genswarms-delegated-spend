@@ -7,6 +7,17 @@ import { connectWallet, fetchOrder, fetchPermitNonce, runBindFlow, runUserTxFlow
 
 const $ = (id) => document.getElementById(id);
 
+// Theme seam, state half: terminal outcomes stamp data-state="error" or
+// "success" on the element they write to, so a theme can color them
+// (#status[data-state="error"] { ... }); progress text carries no stamp.
+// The neutral default theme leaves every state unstyled and copy never
+// changes — without a themed selector this is visually inert.
+export function paintStatus(el, text, state) {
+  el.textContent = text;
+  if (state) el.dataset.state = state;
+  else delete el.dataset.state;
+}
+
 const MESSAGES = {
   order_not_found: "This payment link expired or was already used. Go back to the chat and tap again.",
   unauthorized: "Could not verify your Telegram session. Reopen this page from the chat button.",
@@ -29,6 +40,9 @@ async function main() {
   const provider = globalThis.ethereum;
 
   if (!provider) {
+    // Dead state: the pay button can never arm without a provider — hide it
+    // so the open-in-wallet hint is the page's one action.
+    $("pay").hidden = true;
     $("summary").textContent =
       "No wallet detected in this browser. On your phone? Tap below to open this page in MetaMask. On desktop? Open this chat on your phone and tap the button there.";
     const a = $("open-wallet");
@@ -42,7 +56,9 @@ async function main() {
 
   const fetched = await fetchOrder(deps, orderRef);
   if (!fetched.ok) {
-    $("summary").textContent = MESSAGES[fetched.reason] || `Could not load the order (${fetched.reason}).`;
+    // Dead state: no order to act on (expired / not found / stale build).
+    $("pay").hidden = true;
+    paintStatus($("summary"), MESSAGES[fetched.reason] || `Could not load the order (${fetched.reason}).`, "error");
     return;
   }
 
@@ -64,16 +80,16 @@ function setupPermit(deps, order, orderRef, tg, config) {
 
   $("pay").onclick = async () => {
     $("pay").disabled = true;
-    $("status").textContent = "Connecting wallet…";
+    paintStatus($("status"), "Connecting wallet…");
 
     const conn = await connectWallet(deps);
     if (!conn.ok || conn.chainId !== config.chainId) {
-      $("status").textContent = MESSAGES[conn.ok ? "wrong_chain" : conn.reason];
+      paintStatus($("status"), MESSAGES[conn.ok ? "wrong_chain" : conn.reason], "error");
       $("pay").disabled = false;
       return;
     }
 
-    $("status").textContent = "Waiting for your signature…";
+    paintStatus($("status"), "Waiting for your signature…");
     const nonce = await fetchPermitNonce(deps, conn.account);
 
     const result = await signAndSubmit(deps, {
@@ -84,10 +100,10 @@ function setupPermit(deps, order, orderRef, tg, config) {
     });
 
     if (result.ok) {
-      $("status").textContent = "Payment submitted ✓ — you can return to the chat.";
+      paintStatus($("status"), "Payment submitted ✓ — you can return to the chat.", "success");
       if (tg) setTimeout(() => tg.close(), 1500);
     } else {
-      $("status").textContent = MESSAGES[result.reason] || `Payment failed (${result.reason}). Nothing was charged — reopen this page from the chat button to retry, or use the manual send option below if shown.`;
+      paintStatus($("status"), MESSAGES[result.reason] || `Payment failed (${result.reason}). Nothing was charged — reopen this page from the chat button to retry, or use the manual send option below if shown.`, "error");
       $("pay").disabled = false;
     }
   };
@@ -99,13 +115,13 @@ function setupUserTx(deps, order, orderRef, tg) {
   $("pay").disabled = false;
   $("pay").onclick = async () => {
     $("pay").disabled = true;
-    $("status").textContent = "Opening wallet…";
+    paintStatus($("status"), "Opening wallet…");
     const result = await runUserTxFlow(deps, orderRef);
     if (result.ok) {
-      $("status").textContent = "Transaction sent ✓ — you can return to the chat.";
+      paintStatus($("status"), "Transaction sent ✓ — you can return to the chat.", "success");
       if (tg) setTimeout(() => tg.close(), 1500);
     } else {
-      $("status").textContent = MESSAGES[result.reason] || `Transaction failed (${result.reason}).`;
+      paintStatus($("status"), MESSAGES[result.reason] || `Transaction failed (${result.reason}).`, "error");
       $("pay").disabled = false;
     }
   };
@@ -119,13 +135,13 @@ function setupBind(deps, order, bindRef, tg) {
   $("pay").disabled = false;
   $("pay").onclick = async () => {
     $("pay").disabled = true;
-    $("status").textContent = "Connecting wallet…";
+    paintStatus($("status"), "Connecting wallet…");
     const result = await runBindFlow(deps, bindRef);
     if (result.ok) {
-      $("status").textContent = "Wallet bound ✓ — you can return to the chat.";
+      paintStatus($("status"), "Wallet bound ✓ — you can return to the chat.", "success");
       if (tg) setTimeout(() => tg.close(), 1500);
     } else {
-      $("status").textContent = MESSAGES[result.reason] || `Wallet bind failed (${result.reason}).`;
+      paintStatus($("status"), MESSAGES[result.reason] || `Wallet bind failed (${result.reason}).`, "error");
       $("pay").disabled = false;
     }
   };

@@ -1,68 +1,30 @@
-/* Theme seam: every deployment-facing look decision routes through the
- * custom properties below. This file ships the NEUTRAL DEFAULT — it
- * reproduces the stock light, system-font look, so the package alone is
- * visually unchanged. Consumers reskin by overlaying their own theme.css
- * (same variables, plus any extra rules) over this path; markup, element
- * ids, copy, and scripts never change.
+/* Theme seam: deployments reskin by overlaying (bind-mounting / copying)
+ * their own file over this path — markup, element ids, user-facing copy,
+ * and scripts never change. An overlay REPLACES this file (it does not
+ * cascade after it), so a theme must be self-contained: declare the
+ * variable contract below plus every rule that consumes it.
  *
- * Supply-chain posture holds: the CSP admits only same-origin styles and
- * fonts (style-src/font-src 'self') — themes must self-host any webfonts.
+ * The shipped default is intentionally contract-only — variables, no
+ * element rules — so the package alone keeps the stock light, system-font
+ * look (each page's inline base styles) pixel-for-pixel. app.mjs stamps
+ * data-state="error" | "success" on #status (and on #summary when the
+ * order fails to load); themes may color those states, the default leaves
+ * them unstyled.
+ *
+ * Supply-chain posture holds: the CSP admits only same-origin styles,
+ * fonts, and images (style-src/font-src/img-src 'self') — themes must
+ * self-host any webfonts or imagery.
  */
 
 :root {
   color-scheme: light;
-  --bg: #ffffff;
-  --fg: #111111;
-  --muted: #777777;
-  --accent: #e9e9ed;    /* primary action face (native-like light gray) */
+  --bg: #ffffff; /* page background */
+  --fg: #111111; /* headings / status text */
+  --muted: #777777; /* footer / hint copy */
+  --accent: #e9e9ed; /* primary action (#pay) face */
   --accent-fg: #111111; /* text on --accent */
-  --danger: #b00020;    /* reserved for themes: failure/expired status */
-  --border: #cccccc;
+  --danger: #b00020; /* failure/expired status (data-state="error") */
+  --border: #cccccc; /* secondary action (a.button, #open-wallet) border */
   --font-display: -apple-system, system-ui, sans-serif;
   --font-body: -apple-system, system-ui, sans-serif;
-}
-
-body {
-  background: var(--bg);
-  color: var(--fg);
-  font-family: var(--font-body);
-}
-
-h1 {
-  font-family: var(--font-display);
-  color: var(--fg);
-}
-
-button#pay {
-  font-family: var(--font-body);
-  background: var(--accent);
-  color: var(--accent-fg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-button#pay:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-a.button,
-#open-wallet {
-  font-family: var(--font-body);
-  color: var(--fg);
-  background: transparent;
-  border-color: var(--border);
-}
-
-#status {
-  color: var(--fg);
-}
-
-.muted {
-  color: var(--muted);
-}
-
-#manual code {
-  color: var(--fg);
 }
