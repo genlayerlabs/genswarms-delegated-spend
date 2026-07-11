@@ -63,6 +63,7 @@ defmodule DelegatedSpend.IntakeTest do
     {:ok, keeper} =
       Keeper.start_link(
         signer: signer,
+        chain_id: 84_532,
         store: {MemoryStore, store},
         router: @router,
         action: %{
@@ -132,6 +133,9 @@ defmodule DelegatedSpend.IntakeTest do
 
     assert body["amount"] == 25_000_000
     assert body["order_ref"] == ref
+    # the keeper's RUNTIME chain id rides on every served view — the dapp's
+    # config-drift gate (stale config.json vs a moved RPC) depends on it
+    assert body["chain_id"] == 84_532
 
     other = init_data(666_000_000)
     assert {404, _} = Intake.handle_order(order_params(ctx, %{"init_data" => other, "order_ref" => ref}), ctx)
@@ -403,6 +407,8 @@ defmodule DelegatedSpend.IntakeTest do
       assert {200, body} = Intake.handle_order(%{"order_ref" => bind_ref, "token" => token, "v" => v}, ctx)
       assert body["kind"] == "bind"
       assert body["current_wallet"] == "0xAbCd000000000000000000000000000000000001"
+      # bind views carry the runtime chain id too — bind pages consume config
+      assert body["chain_id"] == 84_532
 
       addr = "0x8ba1f109551bd432803012645ac136ddd64dba72"
 

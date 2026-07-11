@@ -39,6 +39,10 @@ defmodule DelegatedSpend.Intake do
               "kind" => view.kind,
               "amount" => view.amount,
               "expires_at" => view.expires_at,
+              # The keeper's RUNTIME chain id, on every view of every kind:
+              # the dapp fails CLOSED when its static config.json disagrees
+              # (config drift — nothing may be signed on a mismatched chain).
+              "chain_id" => view.chain_id,
               "display" => stringify(view.display)
             }
 

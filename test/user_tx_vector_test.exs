@@ -10,7 +10,8 @@ defmodule DelegatedSpend.UserTxVectorTest do
       DelegatedSpend.Keeper.start_link(%{
         store: {DelegatedSpend.Keeper.MemoryStore, store},
         source_allowlist: ["vector"],
-        order_ttl_s: 900
+        order_ttl_s: 900,
+        chain_id: 84_532
       })
 
     user_ref = "0x" <> String.duplicate("aa", 32)
@@ -35,5 +36,9 @@ defmodule DelegatedSpend.UserTxVectorTest do
     for key <- ["order_ref", "kind", "amount", "display", "tx"] do
       assert body[key] == fixture[key], "field #{key} diverged from the golden vector"
     end
+
+    # not part of the golden fixture (it's runtime state, not order bytes),
+    # but every served view must carry the keeper's chain id
+    assert body["chain_id"] == 84_532
   end
 end

@@ -3,7 +3,7 @@
 // the injected EIP-1193 provider, and the DOM elements.
 
 import { applyProductName } from "./lib/brand.mjs";
-import { connectWallet, fetchOrder, fetchPermitNonce, ownerMismatch, runBindFlow, runUserTxFlow, signAndSubmit, walletDappLink, wrongWalletMessage } from "./lib/flow.mjs";
+import { configDrift, connectWallet, fetchOrder, fetchPermitNonce, ownerMismatch, runBindFlow, runUserTxFlow, signAndSubmit, walletDappLink, wrongWalletMessage } from "./lib/flow.mjs";
 
 const $ = (id) => document.getElementById(id);
 
@@ -26,6 +26,7 @@ const MESSAGES = {
   wrong_chain: "Your wallet is on the wrong network for this payment.",
   no_account: "No wallet account connected.",
   expired: "This order expired. Go back to the chat and tap again.",
+  config_drift: "This page's configuration is out of date (wrong network). Ask the operator to redeploy the wallet app.",
 };
 
 async function main() {
@@ -59,6 +60,17 @@ async function main() {
     // Dead state: no order to act on (expired / not found / stale build).
     $("pay").hidden = true;
     paintStatus($("summary"), MESSAGES[fetched.reason] || `Could not load the order (${fetched.reason}).`, "error");
+    return;
+  }
+
+  // Config drift dead state (fail CLOSED, before ANY wallet interaction —
+  // every setup* path below may connect): the order carries the keeper's
+  // runtime chain id; when the static config.json disagrees, the deployment
+  // is inconsistent and nothing may be signed. Never auto-switch the wallet
+  // to the order's chain — the config's token/router pins are stale too.
+  if (configDrift(fetched.order, config)) {
+    $("pay").hidden = true;
+    paintStatus($("summary"), MESSAGES.config_drift, "error");
     return;
   }
 

@@ -29,7 +29,11 @@ defmodule DelegatedSpend.Keeper do
 
   alias DelegatedSpend.Keeper.{PermitLane, Signer}
 
-  @enforce_opts [:store, :source_allowlist, :order_ttl_s]
+  # :chain_id is REQUIRED (0.3.1): every order view carries the keeper's
+  # runtime chain id so the wallet dapp can refuse to run against a stale
+  # static config.json (config drift = wrong-network fund-loss class). A
+  # keeper that doesn't know its chain must not serve orders at all.
+  @enforce_opts [:store, :source_allowlist, :order_ttl_s, :chain_id]
   @max_json_safe_integer 9_007_199_254_740_991
 
   # Optional :name registers the server (supervision-friendly: a restarted
@@ -76,6 +80,10 @@ defmodule DelegatedSpend.Keeper do
   def init(opts) do
     state = %{
       signer: Map.get(opts, :signer),
+      # The RUNTIME chain id (the app derives it from its RPC at boot). Not a
+      # per-order field: order views stamp it at FETCH time, so orders
+      # persisted before an upgrade still report the chain the keeper serves.
+      chain_id: opts.chain_id,
       store: opts.store,
       router: Map.get(opts, :router),
       action: Map.get(opts, :action),
@@ -151,7 +159,7 @@ defmodule DelegatedSpend.Keeper do
         {:reply, {:error, :not_found}, state}
 
       order ->
-        {:reply, {:ok, order_view(order)}, state}
+        {:reply, {:ok, order_view(order, state)}, state}
     end
   end
 
@@ -380,11 +388,21 @@ defmodule DelegatedSpend.Keeper do
     end
   end
 
-  defp order_view(order) do
+  defp order_view(order, state) do
     base =
       order
       |> Map.take([:order_ref, :amount, :expires_at])
-      |> Map.merge(%{kind: Map.get(order, :kind, "permit"), display: Map.get(order, :display, %{})})
+      |> Map.merge(%{
+        kind: Map.get(order, :kind, "permit"),
+        display: Map.get(order, :display, %{}),
+        # The RUNTIME chain id, on EVERY view (unlike expected_owner it is
+        # never conditional): the dapp compares it against its static
+        # config.json and fails CLOSED on mismatch — a deployed config that
+        # lags an RPC_URL move would otherwise enforce the stale chain and
+        # let a server-built transfer succeed on the wrong network to an
+        # unwatched address.
+        chain_id: state.chain_id
+      })
 
     # An owner binding is part of the payer-facing contract — the wallet the
     # user must pay from, not a secret — so the dapp can refuse a mismatched

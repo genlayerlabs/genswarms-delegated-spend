@@ -4,7 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fetchOrder, ownerMismatch, runBindFlow, runPermitFlow, runUserTxFlow, shortAddress, walletDappLink, wrongWalletMessage } from "../lib/flow.mjs";
+import { configDrift, fetchOrder, ownerMismatch, runBindFlow, runPermitFlow, runUserTxFlow, shortAddress, walletDappLink, wrongWalletMessage } from "../lib/flow.mjs";
 import { buildGrantEnvelope } from "../lib/permit.mjs";
 
 const CONFIG = {
@@ -118,12 +118,12 @@ test("user rejects the signature → typed failure, NO grant POSTed", async () =
   assert.equal(fetchFn.posts.filter((p) => p.url.endsWith("/grants")).length, 0);
 });
 
-test("order not found → typed failure before any wallet interaction beyond connect", async () => {
+test("order not found → typed failure before ANY wallet interaction (fetch precedes connect since 0.3.1)", async () => {
   const provider = mockProvider();
   const fetchFn = mockFetch({ ...happyRoutes, orders: () => ({ status: 404, json: {} }) });
   const result = await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "gone");
   assert.deepEqual(result, { ok: false, reason: "order_not_found" });
-  assert.ok(!provider.calls.some((c) => c.method === "eth_signTypedData_v4"));
+  assert.equal(provider.calls.length, 0);
 });
 
 test("intake version mismatch (stale build) → version_mismatch", async () => {
@@ -133,13 +133,15 @@ test("intake version mismatch (stale build) → version_mismatch", async () => {
   assert.deepEqual(result, { ok: false, reason: "version_mismatch" });
 });
 
-test("wrong chain → typed failure, nothing signed, nothing POSTed", async () => {
+test("wrong chain → typed failure, nothing signed, no grant POSTed", async () => {
   const provider = mockProvider({ eth_chainId: () => "0x1" });
   const fetchFn = mockFetch(happyRoutes);
   const result = await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1");
   assert.equal(result.ok, false);
   assert.equal(result.reason, "wrong_chain");
-  assert.equal(fetchFn.posts.length, 0);
+  // the order fetch precedes connect (0.3.1 drift guard); it is the ONLY request
+  assert.deepEqual(fetchFn.posts.map((p) => p.url), [`${CONFIG.intakeUrl}/orders`]);
+  assert.ok(!provider.calls.some((c) => c.method === "eth_signTypedData_v4"));
 });
 
 test("fetchPermitNonce: eth_call shape is nonces(owner) on the pinned token; nonce + deadline propagate into the typed data", async () => {
@@ -166,12 +168,16 @@ test("fetchPermitNonce: eth_call shape is nonces(owner) on the pinned token; non
   assert.equal(typed.message.deadline, String(ORDER.expires_at));
 });
 
-test("wallet returns no accounts → no_account, nothing fetched or signed", async () => {
+// Deliberate pin change (0.3.1): the order is now fetched BEFORE connect so
+// the config-drift guard can block ahead of any wallet interaction — a
+// connect refusal therefore no longer implies "nothing fetched", only that
+// nothing was signed and no grant left the page.
+test("wallet returns no accounts → no_account, nothing signed, no grant POSTed", async () => {
   const provider = mockProvider({ eth_requestAccounts: () => [] });
   const fetchFn = mockFetch(happyRoutes);
   const result = await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1");
   assert.deepEqual(result, { ok: false, reason: "no_account" });
-  assert.equal(fetchFn.posts.length, 0);
+  assert.equal(fetchFn.posts.filter((p) => p.url.endsWith("/grants")).length, 0);
   assert.ok(!provider.calls.some((c) => c.method === "eth_signTypedData_v4"));
 });
 
@@ -410,10 +416,14 @@ test("owner-bound order matching the connected wallet (different case) proceeds 
   assert.equal(result.status, "submitted");
 });
 
-test("runBindFlow: connect → POST /wallet with connected address", async () => {
+const BIND_ORDER = { order_ref: "b1", kind: "bind", amount: 0, expires_at: 9_999_999_999, display: {}, chain_id: CONFIG.chainId };
+const bindOrders = () => ({ status: 200, json: BIND_ORDER });
+
+test("runBindFlow: fetch bind order → connect → POST /wallet with connected address", async () => {
   const posts = [];
   const provider = mockProvider();
   const fetchFn = mockFetch({
+    orders: bindOrders,
     wallet: (body) => {
       posts.push(body);
       return { status: 200, json: { status: "bound", address: body.address } };
@@ -432,15 +442,97 @@ test("runBindFlow: connect → POST /wallet with connected address", async () =>
 
 test("runBindFlow: stale build 409 → version_mismatch; 410 → expired", async () => {
   const provider = mockProvider();
-  const stale = mockFetch({ wallet: () => ({ status: 409, json: { error: "version mismatch" } }) });
+  const stale = mockFetch({ orders: bindOrders, wallet: () => ({ status: 409, json: { error: "version mismatch" } }) });
   assert.deepEqual(
     await runBindFlow({ provider, fetchFn: stale, config: CONFIG, initData: "", token: "t" }, "b1"),
     { ok: false, reason: "version_mismatch" }
   );
 
-  const gone = mockFetch({ wallet: () => ({ status: 410, json: { error: "expired" } }) });
+  const gone = mockFetch({ orders: bindOrders, wallet: () => ({ status: 410, json: { error: "expired" } }) });
   assert.deepEqual(
     await runBindFlow({ provider, fetchFn: gone, config: CONFIG, initData: "", token: "t" }, "b1"),
     { ok: false, reason: "expired" }
   );
+});
+
+// ── config drift (P1): order.chain_id is the keeper's RUNTIME chain; the
+// static config.json can lag an operator RPC move. Drift = inconsistent
+// deployment → fail CLOSED before ANY wallet interaction, and never
+// auto-switch the wallet to the order's chain. ──────────────────────────────
+
+test("configDrift: absent order chain_id never drifts (older keeper — backward compatible); present must equal config.chainId", () => {
+  assert.equal(configDrift({}, CONFIG), false);
+  assert.equal(configDrift({ chain_id: null }, CONFIG), false);
+  assert.equal(configDrift({ chain_id: CONFIG.chainId }, CONFIG), false);
+  assert.equal(configDrift({ chain_id: 8453 }, CONFIG), true);
+  // a config missing its chainId cannot match a runtime-stamped order — closed
+  assert.equal(configDrift({ chain_id: 8453 }, {}), true);
+});
+
+test("config drift on a permit order → config_drift, NO wallet interaction at all, no grant POSTed", async () => {
+  const provider = mockProvider();
+  const fetchFn = mockFetch({
+    ...happyRoutes,
+    orders: () => ({ status: 200, json: { ...ORDER, chain_id: 8453 } }),
+  });
+
+  const result = await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1");
+  assert.deepEqual(result, { ok: false, reason: "config_drift" });
+  assert.equal(provider.calls.length, 0); // no eth_requestAccounts, no eth_chainId, nothing
+  assert.deepEqual(fetchFn.posts.map((p) => p.url), [`${CONFIG.intakeUrl}/orders`]);
+});
+
+test("config drift on a user_tx order → config_drift, nothing sent, no submitted report", async () => {
+  let sendCalls = 0;
+  const provider = mockProvider({
+    eth_sendTransaction: () => {
+      sendCalls += 1;
+      return "0x" + "ef".repeat(32);
+    },
+  });
+  const fetchFn = mockFetch({
+    orders: () => ({
+      status: 200,
+      json: {
+        order_ref: "r1",
+        kind: "user_tx",
+        amount: 0,
+        expires_at: 9_999_999_999,
+        chain_id: 8453,
+        tx: { to: "0x" + "11".repeat(20), data: "0xdeadbeef", value: 0 },
+        display: {},
+      },
+    }),
+  });
+
+  const res = await runUserTxFlow({ provider, fetchFn, config: CONFIG, initData: "", token: "t" }, "r1");
+  assert.deepEqual(res, { ok: false, reason: "config_drift" });
+  assert.equal(provider.calls.length, 0);
+  assert.equal(sendCalls, 0);
+  assert.equal(fetchFn.posts.filter((p) => p.url.endsWith("/orders/submitted")).length, 0);
+});
+
+test("config drift on a bind order → config_drift, no connect, no /wallet POST", async () => {
+  const provider = mockProvider();
+  const fetchFn = mockFetch({
+    orders: () => ({ status: 200, json: { ...BIND_ORDER, chain_id: 8453 } }),
+    wallet: () => ({ status: 200, json: { status: "bound", address: ACCOUNT } }),
+  });
+
+  const res = await runBindFlow({ provider, fetchFn, config: CONFIG, initData: "", token: "t" }, "b1");
+  assert.deepEqual(res, { ok: false, reason: "config_drift" });
+  assert.equal(provider.calls.length, 0);
+  assert.equal(fetchFn.posts.filter((p) => p.url.endsWith("/wallet")).length, 0);
+});
+
+test("order chain_id matching config.chainId → flows unchanged (permit happy path)", async () => {
+  const provider = mockProvider();
+  const fetchFn = mockFetch({
+    ...happyRoutes,
+    orders: () => ({ status: 200, json: { ...ORDER, chain_id: CONFIG.chainId } }),
+  });
+
+  const result = await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1");
+  assert.equal(result.ok, true);
+  assert.equal(result.status, "submitted");
 });

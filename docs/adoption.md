@@ -64,7 +64,7 @@ New or changed intake endpoints:
 
 | Handler | Request | Purpose |
 |---|---|---|
-| `handle_order/2` | `{v, token \| init_data, order_ref}` | Fetch kind-aware order views; `user_tx` includes `tx`, `bind` includes `current_wallet`; owner-bound orders include `expected_owner`. |
+| `handle_order/2` | `{v, token \| init_data, order_ref}` | Fetch kind-aware order views; `user_tx` includes `tx`, `bind` includes `current_wallet`; owner-bound orders include `expected_owner`; EVERY view carries the keeper's runtime `chain_id` (the dapp fails closed on config drift). |
 | `handle_wallet/2` | `{v, token \| init_data, bind_ref, address}` | Consume one bind order and call `ctx.wallet_fn.(user_ref, address, bind_ref)`. |
 | `handle_submitted/2` | `{v, token \| init_data, order_ref, tx_hash}` | Best-effort user-tx report through `ctx.submitted_fn.(order_id, tx_hash)`. It has zero crediting authority. |
 
@@ -186,7 +186,10 @@ Both halves of the destination rule matter:
 ## 3. Intent calls + typed result handling
 
 Your product code talks to `DelegatedSpend.Keeper` (a GenServer the app
-starts — see item 5 for options):
+starts — see item 5 for options). `Keeper.start_link` REQUIRES `:chain_id` —
+pass the RUNTIME chain id your app derived from its RPC at boot, never a
+config constant: it is stamped on every order view so the wallet dapp can
+refuse to run against a stale `config.json` (config drift):
 
 ```elixir
 # Register a server-authoritative order. `source` is the TRUSTED runtime
@@ -338,7 +341,11 @@ Money-lane bookkeeping should not be in-memory-only in production —
   as the bot button. `go.html` routes mobile users into the configured wallet
   dapp browser and desktop users straight to `index.html`, preserving query
   params. The `version` stamp must match the package tag — the intake 409s a
-  stale build at runtime.
+  stale build at runtime. The `chainId` stamp must match the keeper's runtime
+  chain: every order view carries the keeper's `chain_id`, and the dapp goes
+  to a dead state (nothing connected, nothing signed) when the deployed
+  `config.json` disagrees — moving `RPC_URL` to another chain without
+  redeploying the dapp is a fund-loss class misdeploy, not a UX nit.
 
 - **Intake mounted.** The package ships PURE handlers —
   `DelegatedSpend.Intake.handle_order/2`, `handle_grant/2`,

@@ -55,8 +55,39 @@ scripts stay fixed. No contract changes (`CONTRACT_VERSION` stays `0.2.0`).
   Previously only the keeper's server-side permit check compared owners; the
   browser-signed `user_tx` lane never did, so a wallet other than the bound
   one could pay an order whose payouts go to the bound wallet.
+- Runtime chain id on every order view + config-drift fail-closed guard in
+  the dapp. Every `Keeper.fetch_order` view / `Intake.handle_order` body now
+  carries the keeper's RUNTIME `chain_id` — unlike `expected_owner` it is
+  never conditional — and the webapp gains `configDrift(order, config)`
+  (`webapp/lib/flow.mjs`): when `order.chain_id` is present and differs from
+  the static `config.json` `chainId`, the page goes to a dead state (`#pay`
+  hidden, `data-state="error"`, "ask the operator to redeploy" copy) BEFORE
+  any wallet interaction, and every flow (permit, `user_tx`, bind) refuses
+  with a typed `config_drift`. The wallet is deliberately NOT auto-switched
+  to the order's chain: drift means the deployment is inconsistent (the
+  config's token/router pins are stale too), so nothing may be signed.
+  Previously the dapp enforced the wallet's chain against the static
+  `chainId` only, so an operator moving `RPC_URL` to another chain while the
+  deployed `config.json` lagged would have the dapp enforce the STALE chain
+  and let a server-built token transfer succeed on the wrong network to an
+  unwatched address (fund-loss class). Orders served without `chain_id`
+  (older keepers) behave exactly as before.
 
 ### Changed
+
+- BREAKING (keeper boot): `DelegatedSpend.Keeper.start_link` now REQUIRES
+  `:chain_id` — pass the runtime chain id the app derived from its RPC at
+  boot, never a config constant. A keeper that doesn't know its chain must
+  not serve orders at all (the view stamp above is only as trustworthy as
+  its source), so a missing opt fails the boot instead of failing open into
+  unstamped views.
+- Webapp flows fetch the order BEFORE connecting the wallet (`runPermitFlow`,
+  `runUserTxFlow`, and `runBindFlow` — which now loads its bind order view
+  first): the config-drift gate needs the order's chain id ahead of any
+  wallet interaction. The wallet-vs-config chain check is unchanged and now
+  runs only once order and config already agree; a connect refusal no longer
+  implies "nothing fetched" (the order read is auth-scoped and harmless —
+  connecting a wallet to a drifted page is the dangerous act).
 
 - CSP on both pages: `style-src` gains `'self'` (for `theme.css`) and
   `font-src 'self'` is added (themes may self-host fonts); `go.html`
