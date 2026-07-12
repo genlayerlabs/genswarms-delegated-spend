@@ -4,14 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self';" />
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self';" />
   <title>Opening your wallet...</title>
+  <link rel="icon" href="./favicon.svg" />
   <style>
     body { font-family: -apple-system, system-ui, sans-serif; margin: 1.25rem; }
     a.button { display: inline-block; font-size: 1.15rem; padding: 0.7rem 1.4rem;
                border: 1px solid #ccc; border-radius: 8px; text-decoration: none; }
     .muted { color: #777; font-size: 0.85rem; }
   </style>
+  <link rel="stylesheet" href="./theme.css" />
 </head>
 <body>
   <h1>Opening your wallet...</h1>

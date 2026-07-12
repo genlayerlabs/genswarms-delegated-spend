@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Neutral package default (a plain "fast payment" bolt); deployments
+       overlay this file with their own icon. -->
+  <rect width="32" height="32" rx="7" fill="#4a4a52"/>
+  <path d="M18 4 8.5 18h5.5l-2 10L21.5 14H16z" fill="#ffffff"/>
+</svg>

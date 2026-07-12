@@ -13,6 +13,7 @@ defmodule DelegatedSpend.Keeper.ObjectTest do
   defp keeper_opts(fake, signer) do
     %{
       signer: signer,
+      chain_id: 84_532,
       store: {MemoryStore, MemoryStore.start()},
       router: @router,
       action: @action,
@@ -75,6 +76,7 @@ defmodule DelegatedSpend.Keeper.ObjectTest do
                  store: {MemoryStore, MemoryStore.start()},
                  source_allowlist: [],
                  order_ttl_s: 60,
+                 chain_id: 84_532,
                  name: :spend_keeper_object_taken_test
                }
              })

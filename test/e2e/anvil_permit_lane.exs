@@ -165,6 +165,7 @@ store = MemoryStore.start()
 {:ok, keeper} =
   Keeper.start_link(
     signer: signer,
+    chain_id: chain_id,
     store: {MemoryStore, store},
     router: echo,
     action: %{with_permit_name: "payWithPermit", arg_types: [{:bytes, 32}, {:uint, 256}, {:bytes, 32}]},
@@ -203,6 +204,11 @@ oid2 = DelegatedSpend.Keccak.hash_256("e2e-order-2")
   )
 
 E2E.assert!(order_view["amount"] == 10_000_000, "intake order fetch")
+
+E2E.assert!(
+  order_view["chain_id"] == chain_id,
+  "order view carries the RUNTIME chain id (webapp config-drift gate input)"
+)
 
 # user signs the REAL permit for exactly the fetched amount
 [nonce2] = E2E.view(rpc, token, "nonces", [:address], [Address.to_bytes(user)], [{:uint, 256}])
@@ -272,6 +278,7 @@ E2E.assert!(dest2_bal2 == 10_000_000, "replay caused no second spend")
 {:ok, keeper_fast} =
   Keeper.start_link(
     signer: signer,
+    chain_id: chain_id,
     store: {MemoryStore, MemoryStore.start()},
     router: echo,
     action: %{with_permit_name: "payWithPermit", arg_types: [{:bytes, 32}, {:uint, 256}, {:bytes, 32}]},

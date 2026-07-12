@@ -1,0 +1,30 @@
+/* Theme seam: deployments reskin by overlaying (bind-mounting / copying)
+ * their own file over this path — markup, element ids, user-facing copy,
+ * and scripts never change. An overlay REPLACES this file (it does not
+ * cascade after it), so a theme must be self-contained: declare the
+ * variable contract below plus every rule that consumes it.
+ *
+ * The shipped default is intentionally contract-only — variables, no
+ * element rules — so the package alone keeps the stock light, system-font
+ * look (each page's inline base styles) pixel-for-pixel. app.mjs stamps
+ * data-state="error" | "success" on #status (and on #summary when the
+ * order fails to load); themes may color those states, the default leaves
+ * them unstyled.
+ *
+ * Supply-chain posture holds: the CSP admits only same-origin styles,
+ * fonts, and images (style-src/font-src/img-src 'self') — themes must
+ * self-host any webfonts or imagery.
+ */
+
+:root {
+  color-scheme: light;
+  --bg: #ffffff; /* page background */
+  --fg: #111111; /* headings / status text */
+  --muted: #777777; /* footer / hint copy */
+  --accent: #e9e9ed; /* primary action (#pay) face */
+  --accent-fg: #111111; /* text on --accent */
+  --danger: #b00020; /* failure/expired status (data-state="error") */
+  --border: #cccccc; /* secondary action (a.button, #open-wallet) border */
+  --font-display: -apple-system, system-ui, sans-serif;
+  --font-body: -apple-system, system-ui, sans-serif;
+}

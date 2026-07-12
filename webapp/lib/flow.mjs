@@ -28,6 +28,42 @@ export function walletDappLink(href, prefix = "https://link.metamask.io/dapp/") 
   return prefix + (prefix.includes("?") ? encodeURIComponent(noScheme) : noScheme);
 }
 
+/**
+ * Config drift (fail-closed, fund-loss class): the order carries the keeper's
+ * RUNTIME chain id, while `config.json` is a static file stamped at deploy
+ * time. When they disagree the deployment is inconsistent — enforcing the
+ * stale config chain would let a server-built transfer succeed on the wrong
+ * network to an unwatched address. NOTHING may be signed and the wallet must
+ * not even be connected (and never auto-switched: there is no right chain to
+ * switch to until the operator redeploys). An order without `chain_id`
+ * (older keeper) never drifts — the wallet-vs-config chain check still runs.
+ */
+export function configDrift(order, config) {
+  const runtime = order && order.chain_id;
+  if (runtime == null) return false;
+  return runtime !== (config && config.chainId);
+}
+
+/**
+ * Owner-bound orders (`order.expected_owner`): true when a connected account
+ * is NOT the wallet the order is bound to (case-insensitive). Unbound orders
+ * and a not-yet-connected account never mismatch — connecting is a separate,
+ * already-typed step.
+ */
+export function ownerMismatch(order, account) {
+  const expected = order && order.expected_owner;
+  if (!expected || !account) return false;
+  return expected.toLowerCase() !== account.toLowerCase();
+}
+
+export function shortAddress(address) {
+  return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
+}
+
+export function wrongWalletMessage(expected) {
+  return `Wrong wallet connected. Switch to ${shortAddress(expected)} in your wallet, then reload.`;
+}
+
 export async function fetchOrder(deps, orderRef) {
   const { fetchFn, config } = deps;
   const res = await fetchFn(`${config.intakeUrl}/orders`, {
@@ -104,15 +140,24 @@ export async function signAndSubmit(deps, { orderRef, order, account, nonce }) {
   return { ok: true, status: body.status, tx: body.tx };
 }
 
-/** The whole §6.3 handshake: connect → fetch order → sign → submit. */
+/**
+ * The whole §6.3 handshake: fetch order → sign → submit. The order is
+ * fetched BEFORE the wallet is connected (0.3.1): a drifted deployment must
+ * be refused before ANY wallet interaction, so the config-drift gate needs
+ * the order's runtime chain id first. The wallet-vs-config chain check is
+ * unchanged — it now runs only when order and config already agree.
+ */
 export async function runPermitFlow(deps, orderRef) {
+  const fetched = await fetchOrder(deps, orderRef);
+  if (!fetched.ok) return fetched;
+  if (configDrift(fetched.order, deps.config)) return { ok: false, reason: "config_drift" };
+
   const conn = await connectWallet(deps);
   if (!conn.ok) return conn;
   if (conn.chainId !== deps.config.chainId)
     return { ok: false, reason: "wrong_chain", expected: deps.config.chainId };
-
-  const fetched = await fetchOrder(deps, orderRef);
-  if (!fetched.ok) return fetched;
+  if (ownerMismatch(fetched.order, conn.account))
+    return { ok: false, reason: "wrong_wallet", expected: fetched.order.expected_owner };
 
   const nonce = await fetchPermitNonce(deps, conn.account);
 
@@ -125,14 +170,22 @@ export async function runPermitFlow(deps, orderRef) {
 }
 
 export async function runUserTxFlow(deps, orderRef) {
+  // Fetch-before-connect, same as runPermitFlow: config drift must block
+  // before the wallet is ever touched.
+  const fetched = await fetchOrder(deps, orderRef);
+  if (!fetched.ok) return fetched;
+  if (configDrift(fetched.order, deps.config)) return { ok: false, reason: "config_drift" };
+  if (fetched.order.kind !== "user_tx") return { ok: false, reason: "wrong_kind" };
+
   const conn = await connectWallet(deps);
   if (!conn.ok) return conn;
   if (conn.chainId !== deps.config.chainId)
     return { ok: false, reason: "wrong_chain", expected: deps.config.chainId };
-
-  const fetched = await fetchOrder(deps, orderRef);
-  if (!fetched.ok) return fetched;
-  if (fetched.order.kind !== "user_tx") return { ok: false, reason: "wrong_kind" };
+  // The load-bearing wrong-wallet check: paying an owner-bound order from a
+  // different account debits that account while payouts go to the bound
+  // wallet (and sells revert on-chain). Refuse before the wallet ever opens.
+  if (ownerMismatch(fetched.order, conn.account))
+    return { ok: false, reason: "wrong_wallet", expected: fetched.order.expected_owner };
 
   let tx;
   try {
@@ -163,6 +216,15 @@ function hexQuantity(value) {
 }
 
 export async function runBindFlow(deps, bindRef) {
+  // Bind pages consume config too (chain gate below), so the drift guard
+  // applies here as well: fetch the bind order's view first and refuse a
+  // drifted deployment before the wallet is connected — a healthy-looking
+  // bind page on top of an inconsistent deployment feeds wallets into flows
+  // that would then pay on the wrong network.
+  const fetched = await fetchOrder(deps, bindRef);
+  if (!fetched.ok) return fetched;
+  if (configDrift(fetched.order, deps.config)) return { ok: false, reason: "config_drift" };
+
   const conn = await connectWallet(deps);
   if (!conn.ok) return conn;
   if (conn.chainId !== deps.config.chainId)

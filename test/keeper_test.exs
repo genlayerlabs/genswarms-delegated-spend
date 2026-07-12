@@ -37,6 +37,7 @@ defmodule DelegatedSpend.KeeperTest do
     {:ok, keeper} =
       Keeper.start_link(
         signer: signer,
+        chain_id: 84_532,
         store: {MemoryStore, store},
         router: @router,
         action: @action,
@@ -121,6 +122,7 @@ defmodule DelegatedSpend.KeeperTest do
     {:ok, keeper} =
       Keeper.start_link(
         signer: :spend_signer_named_test,
+        chain_id: 84_532,
         store: {MemoryStore, store},
         router: @router,
         action: @action,
@@ -145,8 +147,29 @@ defmodule DelegatedSpend.KeeperTest do
     {:ok, %{order_ref: ref}} = Keeper.register_order(keeper, "market_phase", order_req())
     assert {:error, :not_found} = Keeper.fetch_order(keeper, ref, "u-EVIL")
     assert {:ok, view} = Keeper.fetch_order(keeper, ref, "u-a")
-    assert Map.keys(view) |> Enum.sort() == [:amount, :display, :expires_at, :kind, :order_ref]
+
+    # :chain_id (the keeper's RUNTIME chain, from init) is on EVERY view —
+    # the dapp fails closed when its static config.json disagrees.
+    assert Map.keys(view) |> Enum.sort() ==
+             [:amount, :chain_id, :display, :expires_at, :kind, :order_ref]
+
     assert view.kind == "permit"
+    assert view.chain_id == 84_532
+
+    # owner-bound orders add exactly one field: the wallet they must be paid
+    # from (payer-facing contract, not a secret — the dapp refuses a
+    # mismatched connected account with it)
+    bound = "0x000000000000000000000000000000000000dEaD"
+
+    {:ok, %{order_ref: bref}} =
+      Keeper.register_order(keeper, "market_phase", Map.put(order_req(), :expected_owner, bound))
+
+    assert {:ok, bview} = Keeper.fetch_order(keeper, bref, "u-a")
+
+    assert Map.keys(bview) |> Enum.sort() ==
+             [:amount, :chain_id, :display, :expected_owner, :expires_at, :kind, :order_ref]
+
+    assert bview.expected_owner == bound
   end
 
   test "happy path: submit → sweep(mined) → credited result + spend recorded" do
@@ -259,6 +282,7 @@ defmodule DelegatedSpend.KeeperTest do
     {:ok, keeper} =
       Keeper.start_link(
         signer: signer,
+        chain_id: 84_532,
         store: {MemoryStore, store},
         router: @router,
         action: @action,
@@ -285,6 +309,7 @@ defmodule DelegatedSpend.KeeperTest do
     {:ok, keeper} =
       Keeper.start_link(
         signer: signer,
+        chain_id: 84_532,
         store: {MemoryStore, store},
         router: @router,
         action: @action,
@@ -317,8 +342,8 @@ defmodule DelegatedSpend.KeeperTest do
 
     {:ok, keeper} =
       Keeper.start_link(
-        signer: signer, store: {MemoryStore, store}, router: @router, action: @action,
-        source_allowlist: ["market_phase"], order_ttl_s: 3_600_000,
+        signer: signer, chain_id: 84_532, store: {MemoryStore, store}, router: @router,
+        action: @action, source_allowlist: ["market_phase"], order_ttl_s: 3_600_000,
         min_deadline_slack_s: 300, rpc_mod: FakeRpc, rpc: fake, sweep_ms: 3_600_000
       )
 
@@ -378,8 +403,8 @@ defmodule DelegatedSpend.KeeperTest do
 
     {:ok, keeper} =
       Keeper.start_link(
-        signer: signer, store: {MemoryStore, store}, router: @router, action: @action,
-        source_allowlist: ["market_phase"], order_ttl_s: 600,
+        signer: signer, chain_id: 84_532, store: {MemoryStore, store}, router: @router,
+        action: @action, source_allowlist: ["market_phase"], order_ttl_s: 600,
         max_consecutive_reverts: max, sweep_ms: 3_600_000
       )
 
@@ -529,6 +554,18 @@ defmodule DelegatedSpend.KeeperTest do
   end
 
   describe "registry-only boot (no permit lane)" do
+    test "keeper refuses to boot without :chain_id — views must always carry the runtime chain" do
+      store = MemoryStore.start()
+
+      assert_raise KeyError, fn ->
+        Keeper.start_link(%{
+          store: {MemoryStore, store},
+          source_allowlist: ["app"],
+          order_ttl_s: 900
+        })
+      end
+    end
+
     test "keeper boots without signer/router/action; permit execute fails typed" do
       store = MemoryStore.start()
 
@@ -536,7 +573,8 @@ defmodule DelegatedSpend.KeeperTest do
         Keeper.start_link(%{
           store: {MemoryStore, store},
           source_allowlist: ["app"],
-          order_ttl_s: 900
+          order_ttl_s: 900,
+          chain_id: 84_532
         })
 
       {:ok, %{order_ref: ref}} =
@@ -548,7 +586,8 @@ defmodule DelegatedSpend.KeeperTest do
           tx: %{to: "0x" <> String.duplicate("11", 20), data: "0x", value: 0}
         })
 
-      assert {:ok, %{kind: "user_tx"}} = Keeper.fetch_order(keeper, ref, "u-a")
+      # even the signerless registry keeper stamps the runtime chain on views
+      assert {:ok, %{kind: "user_tx", chain_id: 84_532}} = Keeper.fetch_order(keeper, ref, "u-a")
 
       {:ok, %{order_ref: pref}} =
         Keeper.register_order(keeper, "app", %{user_ref: "u-a", amount: 5, action_args: []})
@@ -564,7 +603,8 @@ defmodule DelegatedSpend.KeeperTest do
         Keeper.start_link(%{
           store: {MemoryStore, store},
           source_allowlist: ["app"],
-          order_ttl_s: 900
+          order_ttl_s: 900,
+          chain_id: 84_532
         })
 
       assert :unknown = Keeper.order_status(keeper, "missing")
