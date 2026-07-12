@@ -4,10 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <!-- Supply-chain posture (spec §6.2): fully static, zero external hosts.
-       No remote JS, no remote config, no fonts, no analytics. -->
+       No remote JS, no remote config, no remote fonts, no analytics.
+       style-src/font-src 'self' admit only same-origin theme.css + fonts. -->
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:;" />
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self';" />
   <title>Fast payments</title>
+  <link rel="icon" href="./favicon.svg" />
   <style>
     body { font-family: -apple-system, system-ui, sans-serif; margin: 1.25rem; }
     #status { margin-top: 1rem; white-space: pre-wrap; }
@@ -16,6 +18,7 @@
     [hidden] { display: none !important; }
     #open-wallet { display: inline-block; font-size: 1.1rem; padding: 0.6rem 1.2rem; border: 1px solid #ccc; border-radius: 8px; text-decoration: none; }
   </style>
+  <link rel="stylesheet" href="./theme.css" />
 </head>
 <body>
   <h1>Fast payments</h1>

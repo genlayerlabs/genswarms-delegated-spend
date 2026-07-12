@@ -19,6 +19,22 @@ package releases can ship zero contract bytecode changes. `scripts/check-version
   introspection view and the keeper's grant registry stores delegation
   grants, but no redemption path exists yet.
 
+## [0.3.4] - 2026-07-12
+
+Wallet-dapp theme and trust-boundary release. No Solidity bytes changed.
+
+### Added
+
+- A self-contained CSS/config theming seam, default stock styling, favicon, and
+  state stamps for consumer overlays.
+- Dapp-side expected-owner and runtime-chain checks: a mismatched wallet or
+  stale deployed config refuses before signing or submitting an order.
+
+### Changed
+
+- Launcher CSP permits same-origin theme assets while preserving the
+  order-kind-neutral copy: manual transfers credit the same order.
+
 ## [0.3.3] - 2026-07-10
 
 Notary-identity release: the published package name drops the `genswarms-`
