@@ -1,6 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { entryRef, paintStatus } from "../app.mjs";
+import { readFile } from "node:fs/promises";
+import { MESSAGES, entryRef, paintStatus, showTermsPrompt } from "../app.mjs";
+
+const ACCOUNT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+const HASH = "0x" + "11".repeat(32);
+
+function fakeDom() {
+  const elements = {
+    terms: { hidden: true },
+    "terms-link": { href: "" },
+    "terms-accept": { disabled: false, onclick: null },
+    pay: { hidden: false, disabled: false },
+    status: { textContent: "", dataset: {} },
+  };
+  return { elements, get: (id) => elements[id] };
+}
 
 test("entryRef accepts order refs, bind refs, and Telegram start_param", () => {
   assert.equal(entryRef(null, new URLSearchParams("order=o1&token=t")), "o1");
@@ -24,4 +39,159 @@ test("paintStatus stamps terminal states and clears the stamp on progress text",
 
   paintStatus(el, "Payment submitted ✓", "success");
   assert.equal(el.dataset.state, "success");
+});
+
+test("compliance messages are exact", () => {
+  assert.equal(MESSAGES.geo_blocked, "This service isn't available in your region.");
+  assert.equal(MESSAGES.terms_stale, "The terms were updated — please review and accept the new version.");
+});
+
+test("terms controls are hidden and accessible with a safely opened link", async () => {
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  assert.match(html, /<div id="terms" hidden>/);
+  assert.match(html, /<a id="terms-link" target="_blank" rel="noopener">[^<]+<\/a>/);
+  assert.match(html, /<button id="terms-accept"[^>]*>[^<]+<\/button>/);
+});
+
+test("terms prompt wires URL/hash/ref/account and retries the original action after confirmed acceptance", async () => {
+  const { elements, get } = fakeDom();
+  const calls = [];
+  let retries = 0;
+  const acceptFn = async (deps, args) => {
+    calls.push({ deps, args });
+    return { ok: true, status: "accepted", vHash: HASH };
+  };
+  const deps = { marker: "deps" };
+
+  showTermsPrompt(
+    deps,
+    {
+      account: ACCOUNT,
+      terms: { url: "https://example.test/terms", v_hash: HASH },
+      ref: "oref-1",
+      retry: async () => { retries += 1; },
+    },
+    get,
+    acceptFn
+  );
+
+  assert.equal(elements.terms.hidden, false);
+  assert.equal(elements["terms-link"].href, "https://example.test/terms");
+  assert.equal(elements.pay.hidden, true);
+  assert.equal(elements.pay.disabled, true);
+
+  await elements["terms-accept"].onclick();
+  assert.deepEqual(calls, [{ deps, args: { account: ACCOUNT, vHash: HASH, ref: "oref-1" } }]);
+  assert.equal(elements.terms.hidden, true);
+  assert.equal(elements.pay.hidden, false);
+  assert.equal(retries, 1);
+});
+
+test("stale terms replace the hash and require a second signature click", async () => {
+  const { elements, get } = fakeDom();
+  const currentHash = "0x" + "22".repeat(32);
+  const signedHashes = [];
+  let retries = 0;
+  const acceptFn = async (_deps, { vHash }) => {
+    signedHashes.push(vHash);
+    return signedHashes.length === 1
+      ? { ok: false, reason: "terms_stale", vHash: currentHash }
+      : { ok: true, status: "accepted", vHash: currentHash };
+  };
+
+  showTermsPrompt(
+    {},
+    { account: ACCOUNT, terms: { url: "https://example.test/terms", v_hash: HASH }, ref: "oref-1", retry: async () => { retries += 1; } },
+    get,
+    acceptFn
+  );
+
+  await elements["terms-accept"].onclick();
+  assert.deepEqual(signedHashes, [HASH]);
+  assert.equal(elements.status.textContent, MESSAGES.terms_stale);
+  assert.equal(elements.status.dataset.state, "error");
+  assert.equal(elements["terms-accept"].disabled, false);
+  assert.equal(retries, 0);
+
+  await elements["terms-accept"].onclick();
+  assert.deepEqual(signedHashes, [HASH, currentHash]);
+  assert.equal(retries, 1);
+});
+
+test("geo-blocked acceptance enters a terminal error state and hides every action", async () => {
+  const { elements, get } = fakeDom();
+  let retries = 0;
+  showTermsPrompt(
+    {},
+    { account: ACCOUNT, terms: { url: "https://example.test/terms", v_hash: HASH }, ref: "oref-1", retry: async () => { retries += 1; } },
+    get,
+    async () => ({ ok: false, reason: "geo_blocked" })
+  );
+
+  await elements["terms-accept"].onclick();
+  assert.equal(elements.status.textContent, MESSAGES.geo_blocked);
+  assert.equal(elements.status.dataset.state, "error");
+  assert.equal(elements.terms.hidden, true);
+  assert.equal(elements.pay.hidden, true);
+  assert.equal(elements["terms-accept"].disabled, true);
+  assert.equal(retries, 0);
+});
+
+test("nonterminal acceptance failure shows its typed message and re-enables acceptance", async () => {
+  const { elements, get } = fakeDom();
+  let retries = 0;
+  showTermsPrompt(
+    {},
+    { account: ACCOUNT, terms: { url: "https://example.test/terms", v_hash: HASH }, ref: "oref-1", retry: async () => { retries += 1; } },
+    get,
+    async () => ({ ok: false, reason: "unauthorized" })
+  );
+
+  await elements["terms-accept"].onclick();
+  assert.equal(elements.status.textContent, MESSAGES.unauthorized);
+  assert.equal(elements.status.dataset.state, "error");
+  assert.equal(elements.terms.hidden, false);
+  assert.equal(elements.pay.hidden, true);
+  assert.equal(elements["terms-accept"].disabled, false);
+  assert.equal(retries, 0);
+});
+
+test("terms-required without a proven account never signs and re-enables the payment action", () => {
+  const { elements, get } = fakeDom();
+  let accepts = 0;
+  let retries = 0;
+  showTermsPrompt(
+    {},
+    { account: undefined, terms: { url: "https://example.test/terms", v_hash: HASH }, ref: "oref-1", retry: async () => { retries += 1; } },
+    get,
+    async () => { accepts += 1; return { ok: true }; }
+  );
+
+  assert.equal(accepts, 0);
+  assert.equal(retries, 0);
+  assert.equal(elements.terms.hidden, true);
+  assert.equal(elements.pay.hidden, false);
+  assert.equal(elements.pay.disabled, false);
+  assert.equal(elements.status.textContent, MESSAGES.no_account);
+  assert.equal(elements.status.dataset.state, "error");
+  assert.equal(elements["terms-accept"].onclick, null);
+});
+
+test("thrown acceptance request stays nonterminal and re-enables acceptance without retrying the action", async () => {
+  const { elements, get } = fakeDom();
+  let retries = 0;
+  showTermsPrompt(
+    {},
+    { account: ACCOUNT, terms: { url: "https://example.test/terms", v_hash: HASH }, ref: "oref-1", retry: async () => { retries += 1; } },
+    get,
+    async () => { throw new Error("offline"); }
+  );
+
+  await assert.doesNotReject(elements["terms-accept"].onclick());
+  assert.equal(elements.status.textContent, "Terms acceptance failed (request_failed).");
+  assert.equal(elements.status.dataset.state, "error");
+  assert.equal(elements.terms.hidden, false);
+  assert.equal(elements.pay.hidden, true);
+  assert.equal(elements["terms-accept"].disabled, false);
+  assert.equal(retries, 0);
 });

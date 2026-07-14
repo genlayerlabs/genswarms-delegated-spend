@@ -10,6 +10,7 @@
 // the product-side answer to all of them; the wallet dapp only reports.
 
 import { buildPermitTypedData, buildGrantEnvelope } from "./permit.mjs";
+import { buildTermsEnvelope, buildTermsTypedData } from "./terms.mjs";
 
 export async function connectWallet({ provider }) {
   const accounts = await provider.request({ method: "eth_requestAccounts" });
@@ -26,6 +27,59 @@ function authBody(deps, extra) {
 export function walletDappLink(href, prefix = "https://link.metamask.io/dapp/") {
   const noScheme = href.replace(/^https?:\/\//, "");
   return prefix + (prefix.includes("?") ? encodeURIComponent(noScheme) : noScheme);
+}
+
+export async function acceptTerms(deps, { account, vHash, ref }) {
+  const { provider, fetchFn, config } = deps;
+  const issuedAt = Math.floor((deps.nowFn ? deps.nowFn() : Date.now()) / 1000);
+  const typedData = buildTermsTypedData({ chainId: config.chainId, vHash, account, issuedAt });
+
+  let signature;
+  try {
+    signature = await provider.request({
+      method: "eth_signTypedData_v4",
+      params: [account, JSON.stringify(typedData)],
+    });
+  } catch (e) {
+    return { ok: false, reason: e && e.code === 4001 ? "user_rejected" : "sign_failed" };
+  }
+
+  const acceptance = buildTermsEnvelope({
+    version: config.version,
+    chainId: config.chainId,
+    vHash,
+    account,
+    issuedAt,
+    signature,
+  });
+  let res;
+  try {
+    res = await fetchFn(`${config.intakeUrl}/terms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: authBody(deps, { ref, acceptance }),
+    });
+  } catch (_) {
+    return { ok: false, reason: "request_failed" };
+  }
+
+  if (res.status === 451) return { ok: false, reason: "geo_blocked" };
+  if (res.status === 401) return { ok: false, reason: "unauthorized" };
+  let body = {};
+  try {
+    body = (await res.json()) || {};
+  } catch (_) {}
+
+  if (res.status === 200) {
+    if (body.status !== "accepted" || typeof body.v_hash !== "string" || !body.v_hash)
+      return { ok: false, reason: "invalid_response" };
+    return { ok: true, status: "accepted", vHash: body.v_hash };
+  }
+  if (res.status === 409 && body.error === "terms_stale")
+    return { ok: false, reason: "terms_stale", vHash: body.v_hash };
+  if (res.status === 409) return { ok: false, reason: "version_mismatch" };
+  if (res.status === 422) return { ok: false, reason: "invalid", field: body.field };
+  return { ok: false, reason: body.error || `http_${res.status}` };
 }
 
 /**
@@ -143,7 +197,8 @@ export async function signAndSubmit(deps, { orderRef, order, account, nonce }) {
   if (res.status === 401) return { ok: false, reason: "unauthorized" };
   if (res.status === 451) return { ok: false, reason: "geo_blocked" };
   const body = await res.json();
-  if (res.status === 428) return { ok: false, reason: "terms_required", terms: body.terms };
+  if (res.status === 428)
+    return { ok: false, reason: "terms_required", terms: body.terms, account };
   if (res.status !== 200) return { ok: false, reason: body.reason || body.error || `http_${res.status}` };
   return { ok: true, status: body.status, tx: body.tx };
 }
@@ -254,7 +309,8 @@ export async function runBindFlow(deps, bindRef) {
   if (res.status === 410) return { ok: false, reason: "expired" };
   if (res.status === 451) return { ok: false, reason: "geo_blocked" };
   const body = await res.json();
-  if (res.status === 428) return { ok: false, reason: "terms_required", terms: body.terms };
+  if (res.status === 428)
+    return { ok: false, reason: "terms_required", terms: body.terms, account: conn.account };
   if (res.status !== 200) return { ok: false, reason: body.error || `http_${res.status}` };
   return { ok: true, address: body.address };
 }

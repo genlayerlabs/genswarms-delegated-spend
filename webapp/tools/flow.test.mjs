@@ -4,8 +4,9 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { configDrift, fetchOrder, ownerMismatch, runBindFlow, runPermitFlow, runUserTxFlow, shortAddress, termsRequired, walletDappLink, wrongWalletMessage } from "../lib/flow.mjs";
+import { acceptTerms, configDrift, fetchOrder, ownerMismatch, runBindFlow, runPermitFlow, runUserTxFlow, shortAddress, termsRequired, walletDappLink, wrongWalletMessage } from "../lib/flow.mjs";
 import { buildGrantEnvelope } from "../lib/permit.mjs";
+import { buildTermsEnvelope, buildTermsTypedData } from "../lib/terms.mjs";
 
 const CONFIG = {
   version: "0.1.0",
@@ -54,6 +55,7 @@ function mockFetch(routes) {
       url.endsWith("/orders/submitted") ? routes.submitted :
       url.endsWith("/orders") ? routes.orders :
       url.endsWith("/wallet") ? routes.wallet :
+      url.endsWith("/terms") ? routes.terms :
       routes.grants;
     const { status, json } = route(body);
     return { status, json: async () => json };
@@ -568,7 +570,7 @@ test("fetchOrder maps 451 and 428 to exact compliance failures", async () => {
 
 test("grant POST maps 451 and 428 to exact compliance failures", async () => {
   for (const [status, json, expected] of [
-    [428, { terms: TERMS }, { ok: false, reason: "terms_required", terms: TERMS }],
+    [428, { terms: TERMS }, { ok: false, reason: "terms_required", terms: TERMS, account: ACCOUNT }],
     [451, { error: "blocked" }, { ok: false, reason: "geo_blocked" }],
   ]) {
     const provider = mockProvider();
@@ -582,7 +584,7 @@ test("grant POST maps 451 and 428 to exact compliance failures", async () => {
 
 test("wallet POST maps 451 and 428 to exact compliance failures", async () => {
   for (const [status, json, expected] of [
-    [428, { terms: TERMS }, { ok: false, reason: "terms_required", terms: TERMS }],
+    [428, { terms: TERMS }, { ok: false, reason: "terms_required", terms: TERMS, account: ACCOUNT }],
     [451, { error: "blocked" }, { ok: false, reason: "geo_blocked" }],
   ]) {
     const provider = mockProvider();
@@ -709,4 +711,205 @@ test("required=false terms preserve the permit happy path", async () => {
     await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1"),
     { ok: true, status: "submitted", tx: "0xabc" }
   );
+});
+
+// ── terms acceptance ───────────────────────────────────────────────────────
+
+const TERMS_HASH = "0x" + "33".repeat(32);
+
+test("acceptTerms signs exact typed data and POSTs the exact initData envelope with active ref", async () => {
+  const provider = mockProvider();
+  const fetchFn = mockFetch({
+    terms: () => ({ status: 200, json: { status: "accepted", v_hash: TERMS_HASH } }),
+  });
+  const issuedAt = 1_752_500_123;
+
+  assert.deepEqual(
+    await acceptTerms(
+      { provider, fetchFn, config: CONFIG, initData: "id-blob", nowFn: () => issuedAt * 1000 + 999 },
+      { account: ACCOUNT, vHash: TERMS_HASH, ref: "oref-1" }
+    ),
+    { ok: true, status: "accepted", vHash: TERMS_HASH }
+  );
+
+  const typedData = buildTermsTypedData({
+    chainId: CONFIG.chainId,
+    vHash: TERMS_HASH,
+    account: ACCOUNT,
+    issuedAt,
+  });
+  assert.deepEqual(provider.calls, [
+    { method: "eth_signTypedData_v4", params: [ACCOUNT, JSON.stringify(typedData)] },
+  ]);
+  assert.deepEqual(fetchFn.posts, [
+    {
+      url: `${CONFIG.intakeUrl}/terms`,
+      body: {
+        v: CONFIG.version,
+        init_data: "id-blob",
+        ref: "oref-1",
+        acceptance: buildTermsEnvelope({
+          version: CONFIG.version,
+          chainId: CONFIG.chainId,
+          vHash: TERMS_HASH,
+          account: ACCOUNT,
+          issuedAt,
+          signature: SIG,
+        }),
+      },
+    },
+  ]);
+});
+
+test("acceptTerms uses token auth instead of initData without changing the active ref", async () => {
+  const provider = mockProvider();
+  const fetchFn = mockFetch({
+    terms: () => ({ status: 200, json: { status: "accepted", v_hash: TERMS_HASH } }),
+  });
+
+  await acceptTerms(
+    { provider, fetchFn, config: CONFIG, initData: "IGNORED", token: "tok", nowFn: () => 0 },
+    { account: ACCOUNT, vHash: TERMS_HASH, ref: "bind-1" }
+  );
+
+  assert.equal(fetchFn.posts[0].body.token, "tok");
+  assert.equal(fetchFn.posts[0].body.init_data, undefined);
+  assert.equal(fetchFn.posts[0].body.ref, "bind-1");
+});
+
+test("acceptTerms maps wallet rejection and does not POST", async () => {
+  const provider = mockProvider({
+    eth_signTypedData_v4: () => {
+      const error = new Error("no");
+      error.code = 4001;
+      throw error;
+    },
+  });
+  const fetchFn = mockFetch({ terms: () => ({ status: 200, json: {} }) });
+
+  assert.deepEqual(
+    await acceptTerms(
+      { provider, fetchFn, config: CONFIG, initData: "x" },
+      { account: ACCOUNT, vHash: TERMS_HASH, ref: "oref-1" }
+    ),
+    { ok: false, reason: "user_rejected" }
+  );
+  assert.equal(fetchFn.posts.length, 0);
+});
+
+test("acceptTerms maps other signing failures and does not POST", async () => {
+  const provider = mockProvider({
+    eth_signTypedData_v4: () => {
+      throw new Error("broken wallet");
+    },
+  });
+  const fetchFn = mockFetch({ terms: () => ({ status: 200, json: {} }) });
+
+  assert.deepEqual(
+    await acceptTerms(
+      { provider, fetchFn, config: CONFIG, initData: "x" },
+      { account: ACCOUNT, vHash: TERMS_HASH, ref: "oref-1" }
+    ),
+    { ok: false, reason: "sign_failed" }
+  );
+  assert.equal(fetchFn.posts.length, 0);
+});
+
+test("acceptTerms maps a rejected request to a retryable typed failure", async () => {
+  const provider = mockProvider();
+  let requests = 0;
+  const fetchFn = async () => {
+    requests += 1;
+    throw new Error("offline");
+  };
+
+  assert.deepEqual(
+    await acceptTerms(
+      { provider, fetchFn, config: CONFIG, initData: "x", nowFn: () => 0 },
+      { account: ACCOUNT, vHash: TERMS_HASH, ref: "oref-1" }
+    ),
+    { ok: false, reason: "request_failed" }
+  );
+  assert.equal(requests, 1);
+});
+
+test("acceptTerms maps 451 and 401 without parsing an empty body", async () => {
+  for (const [status, expected] of [
+    [451, { ok: false, reason: "geo_blocked" }],
+    [401, { ok: false, reason: "unauthorized" }],
+  ]) {
+    let jsonCalls = 0;
+    const fetchFn = async () => ({
+      status,
+      json: async () => {
+        jsonCalls += 1;
+        throw new SyntaxError("empty body");
+      },
+    });
+    assert.deepEqual(
+      await acceptTerms(
+        { provider: mockProvider(), fetchFn, config: CONFIG, initData: "x", nowFn: () => 0 },
+        { account: ACCOUNT, vHash: TERMS_HASH, ref: "oref-1" }
+      ),
+      expected
+    );
+    assert.equal(jsonCalls, 0);
+  }
+});
+
+test("acceptTerms safely types malformed JSON responses", async () => {
+  for (const [status, expected] of [
+    [200, { ok: false, reason: "invalid_response" }],
+    [503, { ok: false, reason: "http_503" }],
+  ]) {
+    const fetchFn = async () => ({
+      status,
+      json: async () => { throw new SyntaxError("bad JSON"); },
+    });
+    assert.deepEqual(
+      await acceptTerms(
+        { provider: mockProvider(), fetchFn, config: CONFIG, initData: "x", nowFn: () => 0 },
+        { account: ACCOUNT, vHash: TERMS_HASH, ref: "oref-1" }
+      ),
+      expected
+    );
+  }
+});
+
+test("acceptTerms does not confirm a 200 without the accepted status and hash", async () => {
+  for (const json of [{ status: "accepted" }, { v_hash: TERMS_HASH }]) {
+    const fetchFn = mockFetch({ terms: () => ({ status: 200, json }) });
+    assert.deepEqual(
+      await acceptTerms(
+        { provider: mockProvider(), fetchFn, config: CONFIG, initData: "x", nowFn: () => 0 },
+        { account: ACCOUNT, vHash: TERMS_HASH, ref: "oref-1" }
+      ),
+      { ok: false, reason: "invalid_response" }
+    );
+  }
+});
+
+test("acceptTerms maps stale/current hash, compliance, validation, and generic HTTP failures", async () => {
+  const currentHash = "0x" + "44".repeat(32);
+  const cases = [
+    [409, { error: "terms_stale", v_hash: currentHash }, { ok: false, reason: "terms_stale", vHash: currentHash }],
+    [451, { error: "geo_blocked" }, { ok: false, reason: "geo_blocked" }],
+    [401, { error: "unauthorized" }, { ok: false, reason: "unauthorized" }],
+    [409, { error: "version mismatch" }, { ok: false, reason: "version_mismatch" }],
+    [422, { error: "invalid", field: "sig" }, { ok: false, reason: "invalid", field: "sig" }],
+    [503, { error: "unavailable" }, { ok: false, reason: "unavailable" }],
+    [418, {}, { ok: false, reason: "http_418" }],
+  ];
+
+  for (const [status, json, expected] of cases) {
+    const provider = mockProvider();
+    const fetchFn = mockFetch({ terms: () => ({ status, json }) });
+    assert.deepEqual(
+      await acceptTerms(
+        { provider, fetchFn, config: CONFIG, initData: "x", nowFn: () => 0 },
+        { account: ACCOUNT, vHash: TERMS_HASH, ref: "oref-1" }
+      ),
+      expected
+    );
+  }
 });
