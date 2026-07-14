@@ -104,6 +104,97 @@ defmodule DelegatedSpend.IntakeTest do
 
   defp future, do: System.os_time(:second) + 600
 
+  describe "compliance geofencing" do
+    test "blocks every handler before version pinning or authentication" do
+      ctx = %{compliance: %{geo_allow: ["US"]}}
+
+      for handler <- [:handle_order, :handle_grant, :handle_wallet, :handle_submitted] do
+        assert {451, %{"error" => "geo_blocked"}} =
+                 apply(Intake, handler, [%{"country" => "US"}, %{country: "CA"}, ctx])
+      end
+    end
+
+    test "blocked requests do not burn rate buckets or reach the keeper store" do
+      ref = String.duplicate("ab", 32)
+      user_ref = "ref-#{@user_id}"
+      token = DelegatedSpend.Intake.Token.mint("tsecret", ref, user_ref, future())
+
+      requests = [
+        {:handle_order, %{"order_ref" => ref, "token" => token, "v" => "0.2.0"}},
+        {:handle_grant,
+         %{"order_ref" => ref, "token" => token, "permit" => permit_env(25_000_000)}},
+        {:handle_wallet,
+         %{
+           "bind_ref" => ref,
+           "token" => token,
+           "address" => "0x8ba1f109551bd432803012645ac136ddd64dba72",
+           "v" => "0.2.0"
+         }},
+        {:handle_submitted,
+         %{
+           "order_ref" => ref,
+           "token" => token,
+           "tx_hash" => "0x" <> String.duplicate("ef", 32),
+           "v" => "0.2.0"
+         }}
+      ]
+
+      for {handler, params} <- requests do
+        limiter = Rate.start()
+
+        ctx = %{
+          compliance: %{geo_allow: ["US"]},
+          token_secret: "tsecret",
+          pinned: %{chain_id: 84_532, token: @token, router: @router, version: "0.2.0"},
+          rate: {limiter, 1},
+          wallet_fn: fn _user_ref, _address, _bind_ref -> :ok end
+        }
+
+        assert {451, %{"error" => "geo_blocked"}} =
+                 apply(Intake, handler, [params, %{country: "CA"}, ctx])
+
+        assert Rate.allow?(limiter, user_ref, 1)
+      end
+    end
+
+    test "configured two-arity handlers deny because their metadata is empty" do
+      ctx = %{compliance: %{geo_allow: ["US"]}}
+
+      for handler <- [:handle_order, :handle_grant, :handle_wallet, :handle_submitted] do
+        assert {451, %{"error" => "geo_blocked"}} = apply(Intake, handler, [%{}, ctx])
+      end
+    end
+
+    test "configured compliance fails closed on missing or malformed policy metadata" do
+      for {compliance, meta} <- [
+            {%{}, %{country: "US"}},
+            {%{geo_allow: "US"}, %{country: "US"}},
+            {%{geo_allow: ["US"]}, %{}},
+            {%{geo_allow: ["US"]}, %{country: "USA"}}
+          ] do
+        assert {451, %{"error" => "geo_blocked"}} =
+                 Intake.handle_order(%{}, meta, %{compliance: compliance})
+      end
+
+      ctx = %{compliance: %{geo_allow: ["US"]}, bot_token: @bot_token, max_age_s: 900}
+
+      assert {401, %{"error" => "unauthorized"}} =
+               Intake.handle_order(%{"country" => "CA"}, %{country: "US"}, ctx)
+
+      assert {451, %{"error" => "geo_blocked"}} =
+               Intake.handle_order(%{"country" => "US"}, %{}, ctx)
+    end
+
+    test "metadata has no effect when compliance is absent" do
+      %{ctx: ctx, keeper: keeper} = start_stack()
+      ref = register(keeper, @user_id)
+      params = order_params(ctx, %{"init_data" => init_data(), "order_ref" => ref})
+
+      assert {200, body} = Intake.handle_order(params, ctx)
+      assert {200, ^body} = Intake.handle_order(params, %{country: "CA"}, ctx)
+    end
+  end
+
   test "unauthenticated requests are rejected before ANY work" do
     %{ctx: ctx, store: store, keeper: keeper} = start_stack()
     ref = register(keeper, @user_id)

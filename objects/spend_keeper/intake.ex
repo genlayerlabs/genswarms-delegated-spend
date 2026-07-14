@@ -25,16 +25,18 @@ defmodule DelegatedSpend.Intake do
   `rate = {RateLimiter-pid, max_per_window}` (see `DelegatedSpend.Intake.Rate`).
   """
 
+  alias DelegatedSpend.Compliance.{Geo, Store}
   alias DelegatedSpend.Intake.{GrantValidation, Rate, TelegramAuth, Token}
   alias DelegatedSpend.Keeper
 
   @doc "GET /orders?order_ref=… — fetch a pending order for the verified user."
   def handle_order(params, ctx) when is_map(params), do: handle_order(params, %{}, ctx)
 
-  def handle_order(params, _meta, ctx) when is_map(params) do
+  def handle_order(params, meta, ctx) when is_map(params) do
     order_ref = to_string(params["order_ref"] || "")
 
-    with :ok <- pin_version(params, ctx),
+    with :ok <- geofence(meta, ctx),
+         :ok <- pin_version(params, ctx),
          {:ok, user_ref} <- authenticate(params, ctx, order_ref),
          :ok <- allow(ctx, user_ref) do
       case Keeper.fetch_order(ctx.keeper, order_ref, user_ref) do
@@ -92,10 +94,11 @@ defmodule DelegatedSpend.Intake do
   """
   def handle_grant(params, ctx) when is_map(params), do: handle_grant(params, %{}, ctx)
 
-  def handle_grant(params, _meta, ctx) when is_map(params) do
+  def handle_grant(params, meta, ctx) when is_map(params) do
     order_ref = to_string(params["order_ref"] || "")
 
-    with {:ok, user_ref} <- authenticate(params, ctx, order_ref),
+    with :ok <- geofence(meta, ctx),
+         {:ok, user_ref} <- authenticate(params, ctx, order_ref),
          :ok <- allow(ctx, user_ref) do
       case GrantValidation.validate_permit(params["permit"] || %{}, ctx.pinned) do
         {:error, {:pinned_mismatch, :version}} ->
@@ -125,10 +128,11 @@ defmodule DelegatedSpend.Intake do
   @doc "POST /wallet — bind a connected wallet address through a bind order."
   def handle_wallet(params, ctx) when is_map(params), do: handle_wallet(params, %{}, ctx)
 
-  def handle_wallet(params, _meta, ctx) when is_map(params) do
+  def handle_wallet(params, meta, ctx) when is_map(params) do
     bind_ref = to_string(params["bind_ref"] || "")
 
-    with :ok <- pin_version(params, ctx),
+    with :ok <- geofence(meta, ctx),
+         :ok <- pin_version(params, ctx),
          {:ok, user_ref} <- authenticate(params, ctx, bind_ref),
          :ok <- allow(ctx, user_ref),
          {:ok, wallet_fn} <- fetch_fn(ctx, :wallet_fn, 3),
@@ -150,10 +154,11 @@ defmodule DelegatedSpend.Intake do
   @doc "POST /orders/submitted — best-effort user_tx hash report; watcher hint only."
   def handle_submitted(params, ctx) when is_map(params), do: handle_submitted(params, %{}, ctx)
 
-  def handle_submitted(params, _meta, ctx) when is_map(params) do
+  def handle_submitted(params, meta, ctx) when is_map(params) do
     order_ref = to_string(params["order_ref"] || "")
 
-    with :ok <- pin_version(params, ctx),
+    with :ok <- geofence(meta, ctx),
+         :ok <- pin_version(params, ctx),
          {:ok, user_ref} <- authenticate(params, ctx, order_ref),
          :ok <- allow(ctx, user_ref),
          {:ok, tx_hash} <- tx_hash(params["tx_hash"]),
@@ -170,6 +175,21 @@ defmodule DelegatedSpend.Intake do
   end
 
   # ── auth + rate ────────────────────────────────────────────────────────────
+
+  defp geofence(meta, ctx) do
+    case Map.fetch(ctx, :compliance) do
+      :error ->
+        :ok
+
+      {:ok, compliance} ->
+        allow = if is_map(compliance), do: Map.get(compliance, :geo_allow)
+        country = Store.normalize_meta(meta).country
+
+        if Geo.allowed?(allow, country),
+          do: :ok,
+          else: {:error, 451, %{"error" => "geo_blocked"}}
+    end
+  end
 
   defp authenticate(params, ctx, ref) do
     case {params["token"], Map.get(ctx, :token_secret)} do
