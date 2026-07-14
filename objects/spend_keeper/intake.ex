@@ -29,6 +29,8 @@ defmodule DelegatedSpend.Intake do
   alias DelegatedSpend.Intake.{GrantValidation, Rate, TelegramAuth, Token}
   alias DelegatedSpend.Keeper
 
+  @unavailable {:error, 503, %{"error" => "unavailable"}}
+
   @doc "GET /orders?order_ref=… — fetch a pending order for the verified user."
   def handle_order(params, ctx) when is_map(params), do: handle_order(params, %{}, ctx)
 
@@ -38,7 +40,8 @@ defmodule DelegatedSpend.Intake do
     with :ok <- geofence(meta, ctx),
          :ok <- pin_version(params, ctx),
          {:ok, user_ref} <- authenticate(params, ctx, order_ref),
-         :ok <- allow(ctx, user_ref) do
+         :ok <- allow(ctx, user_ref),
+         {:ok, terms} <- terms_state(ctx, user_ref) do
       case Keeper.fetch_order(ctx.keeper, order_ref, user_ref) do
         {:ok, view} ->
           if expired_user_tx?(view) do
@@ -77,6 +80,8 @@ defmodule DelegatedSpend.Intake do
                   base
               end
 
+            body = if terms, do: Map.put(body, "terms", terms), else: body
+
             {200, body}
           end
 
@@ -99,7 +104,8 @@ defmodule DelegatedSpend.Intake do
 
     with :ok <- geofence(meta, ctx),
          {:ok, user_ref} <- authenticate(params, ctx, order_ref),
-         :ok <- allow(ctx, user_ref) do
+         :ok <- allow(ctx, user_ref),
+         :ok <- require_terms(ctx, user_ref) do
       case GrantValidation.validate_permit(params["permit"] || %{}, ctx.pinned) do
         {:error, {:pinned_mismatch, :version}} ->
           {409, %{"error" => "version mismatch"}}
@@ -149,6 +155,7 @@ defmodule DelegatedSpend.Intake do
          :ok <- pin_version(params, ctx),
          {:ok, user_ref} <- authenticate(params, ctx, bind_ref),
          :ok <- allow(ctx, user_ref),
+         :ok <- require_terms(ctx, user_ref),
          {:ok, wallet_fn} <- fetch_fn(ctx, :wallet_fn, 3),
          {:ok, address} <- checksum_address(params["address"]),
          {:ok, order} <- fetch_kind(ctx, bind_ref, user_ref, "bind"),
@@ -179,6 +186,7 @@ defmodule DelegatedSpend.Intake do
          :ok <- pin_version(params, ctx),
          {:ok, user_ref} <- authenticate(params, ctx, order_ref),
          :ok <- allow(ctx, user_ref),
+         :ok <- require_terms(ctx, user_ref),
          {:ok, tx_hash} <- tx_hash(params["tx_hash"]),
          {:ok, order} <- fetch_kind(ctx, order_ref, user_ref, "user_tx") do
       case Map.get(ctx, :submitted_fn) do
@@ -252,6 +260,66 @@ defmodule DelegatedSpend.Intake do
       _ -> nil
     end
   end
+
+  defp require_terms(ctx, user_ref) do
+    case terms_state(ctx, user_ref) do
+      {:ok, nil} ->
+        :ok
+
+      {:ok, %{"required" => false}} ->
+        :ok
+
+      {:ok, %{"v_hash" => hash, "url" => url}} ->
+        {:error, 428,
+         %{"error" => "terms_required", "terms" => %{"v_hash" => hash, "url" => url}}}
+
+      error ->
+        error
+    end
+  end
+
+  defp terms_state(ctx, user_ref) do
+    case ctx do
+      %{compliance: compliance} when is_map(compliance) ->
+        case Map.fetch(compliance, :terms) do
+          :error -> {:ok, nil}
+          {:ok, terms} -> read_terms_state(compliance, terms, user_ref)
+        end
+
+      _ ->
+        {:ok, nil}
+    end
+  end
+
+  defp read_terms_state(
+         %{store: {module, ref}},
+         %{hash: "0x" <> hex = hash, url: url},
+         user_ref
+       )
+       when is_atom(module) and byte_size(hex) == 64 and is_binary(url) and byte_size(url) > 0 do
+    with {:ok, _} <- Base.decode16(hex, case: :mixed),
+         true <- Code.ensure_loaded?(module),
+         true <- function_exported?(module, :get_acceptance, 3) do
+      case apply(module, :get_acceptance, [ref, user_ref, hash]) do
+        nil ->
+          {:ok, %{"required" => true, "v_hash" => hash, "url" => url}}
+
+        acceptance when is_map(acceptance) ->
+          {:ok, %{"required" => false, "v_hash" => hash, "url" => url}}
+
+        _ ->
+          @unavailable
+      end
+    else
+      _ -> @unavailable
+    end
+  rescue
+    _ -> @unavailable
+  catch
+    _, _ -> @unavailable
+  end
+
+  defp read_terms_state(_compliance, _terms, _user_ref), do: @unavailable
 
   defp expired_user_tx?(%{kind: "user_tx", expires_at: exp}), do: System.os_time(:second) > exp
   defp expired_user_tx?(_view), do: false
