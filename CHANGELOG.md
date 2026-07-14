@@ -19,6 +19,22 @@ package releases can ship zero contract bytecode changes. `scripts/check-version
   introspection view and the keeper's grant registry stores delegation
   grants, but no redemption path exists yet.
 
+## [0.5.0] - 2026-07-14
+
+Compliance-layer release. No Solidity bytes changed; `CONTRACT_VERSION`
+remains `0.2.0`.
+
+### Added
+
+- Compliance-layer request evidence, a fail-closed country geofence returning
+  `451`, a terms gate returning `428`, and `POST /terms` acceptance.
+- `DelegatedSpend.Compliance.Store` for acceptance and audit-event persistence.
+
+### Changed
+
+- Intake handlers now expose three-arity request-metadata forms while keeping
+  their two-arity compatibility forms.
+
 ## [0.4.0] - 2026-07-14
 
 Durable execution-status release. No Solidity bytes changed;

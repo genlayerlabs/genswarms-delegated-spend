@@ -405,31 +405,136 @@ Money-lane bookkeeping should not be in-memory-only in production —
 
 ## 6. Compliance layer
 
+The consuming app supplies trusted request metadata to every three-arity
+handler. A compact Plug mapping looks like this (the surrounding Plug still
+owns body limits, JSON decoding, and response encoding):
+
+```elixir
+def call(conn, ctx) do
+  conn = Plug.Conn.fetch_cookies(conn)
+  header = fn name -> conn |> Plug.Conn.get_req_header(name) |> List.first() end
+  ip = conn.remote_ip |> :inet.ntoa() |> to_string()
+
+  meta = %{
+    ip: ip,
+    country: header.("cf-ipcountry"),
+    user_agent: header.("user-agent"),
+    session_id: conn.req_cookies["spend_session"]
+  }
+
+  {status, body} = case {conn.method, conn.path_info} do
+    {"POST", ["spend", "orders"]} -> Intake.handle_order(conn.params, meta, ctx)
+    {"POST", ["spend", "grants"]} -> Intake.handle_grant(conn.params, meta, ctx)
+    {"POST", ["spend", "wallet"]} -> Intake.handle_wallet(conn.params, meta, ctx)
+    {"POST", ["spend", "orders", "submitted"]} -> Intake.handle_submitted(conn.params, meta, ctx)
+    {"POST", ["spend", "terms"]} -> Intake.handle_terms(conn.params, meta, ctx)
+  end
+
+  conn |> Plug.Conn.put_status(status) |> json(body)
+end
+```
+
+The edge/CDN must set or overwrite `CF-IPCountry`, and the origin must accept
+that header only from the trusted edge. Never trust a country header clients
+can supply directly. The package intentionally has no browser-geolocation,
+blocklist, GeoIP database, or network-lookup mode.
+
+> **Compliance warning:** once `ctx.compliance` is configured, calling a
+> two-arity handler supplies no metadata and therefore denies every request;
+> an empty geo allowlist also denies everyone. Use all five three-arity forms.
+> `record_acceptance` is fail-closed: a failure returns `503`, and acceptance
+> is not acknowledged.
+
 ### Session/cookie evidence
 
-The consuming app owns the first-party session cookie. Its Plug mints and
-reads that cookie, then passes only its value as `meta.session_id` to
-`handle_order/3`, `handle_grant/3`, `handle_wallet/3`, or
-`handle_submitted/3`. Use exactly these cookie attributes:
-`HttpOnly; Secure; SameSite=Lax; Path=/`.
+The app owns the first-party `spend_session` cookie and should mint it with
+`HttpOnly; Secure; SameSite=Lax; Path=/`. The package only normalizes and
+persists the opaque value passed as `meta.session_id`. This relies on the
+existing same-origin intake assumption (`intakeUrl: "/spend"`), under which
+browser fetches already carry first-party cookies.
 
-The package does not mint, read, or manage cookies. It only normalizes,
-carries, and stores `session_id` through the configured compliance adapter.
-Session evidence therefore requires same-origin intake. The current deployment
-posture already uses the same-origin `intakeUrl` `/spend`; browser fetch
-defaults send first-party cookies on same-origin requests, so no wallet-dapp
-change or explicit `credentials` option is needed.
+`session_id: nil` is accepted because Telegram webviews, ITP, privacy settings,
+or disabled cookies may drop the cookie. Legal must sign off on nullable
+session evidence. Adapters must never store or log raw `initData`, access
+tokens, authentication bodies, or Telegram/other platform identifiers.
 
-`session_id: nil` is valid and expected evidence: Telegram webviews, ITP,
-privacy settings, or disabled cookies may drop it. Legal must approve nullable
-session evidence. When present, the session id must be opaque. Compliance
-adapters must never store or log raw `initData`, access tokens, Telegram or
-other platform ids, or authentication request bodies.
+### Compliance context
 
-Legacy two-arity intake handlers cannot supply session evidence. They delegate
-with empty metadata, and configured compliance already denies a missing country
-fail-closed. Production compliance deployments must use the three-arity
-handlers.
+Read and hash the deployed terms file at boot, then serve those exact bytes at
+the configured URL:
+
+```elixir
+terms_bytes = File.read!(System.fetch_env!("SPEND_TERMS_PATH"))
+
+compliance = %{
+  geo_allow: System.fetch_env!("SPEND_GEOFENCE_COUNTRIES") |> String.split(",", trim: true),
+  terms: %{
+    hash: DelegatedSpend.Compliance.Terms.hash_terms(terms_bytes),
+    url: System.fetch_env!("SPEND_TERMS_URL")
+  },
+  store: {MyApp.ComplianceStore, MyApp.Repo}
+}
+
+ctx = Map.put(ctx, :compliance, compliance)
+```
+
+A hand-copied terms hash is not configuration: hash the bytes read from
+`SPEND_TERMS_PATH`, and make the terms route return those same bytes. Countries
+are comma-separated ISO 3166-1 alpha-2 codes; use an allowlist, not a
+blocklist.
+
+Implement the four `DelegatedSpend.Compliance.Store` callbacks:
+`record_acceptance/2`, `get_acceptance/3`, `record_event/2`, and
+`events_for/2`. The executable adapter specification is
+`test/compliance_store_test.exs`. The app's `tg_ci` is the blinded, opaque
+`user_ref`; it is never a raw Telegram or other platform identifier.
+
+`record_event` is best-effort because it runs after an already-executed money
+operation. Persist the audit kinds `wallet_bound`, `grant_submitted`, and
+`tx_submitted`. This differs deliberately from request-critical acceptance
+persistence; legal must sign off on that durability asymmetry.
+
+### Terms route and UI states
+
+Mount `POST /spend/terms` on `handle_terms/3`. Its body is the signed
+acceptance envelope plus the active authentication material:
+
+```json
+{
+  "v": "0.5.0",
+  "token": "<ref-scoped token, or send init_data instead>",
+  "ref": "<user-approved active order or bind ref>",
+  "acceptance": {
+    "v": "0.5.0",
+    "chain_id": 84532,
+    "v_hash": "0x...",
+    "account": "0x...",
+    "issued_at": 1900000000,
+    "sig": {"v": 27, "r": "0x...", "s": "0x..."}
+  }
+}
+```
+
+The user-approved top-level `ref` is used only to authenticate the existing
+ref-scoped token. It is not signed and is not persisted. Keep the UI's three
+dead states explicit: `geo_blocked` (`451`, terminal), `terms_required`
+(`428`, prompt acceptance), and `terms_stale` (`409`, reload the current hash
+and require a new signature).
+
+Retention periods, legal export/deletion workflows, and GDPR policy remain the
+consuming app's responsibility.
+
+### Launch checklist
+
+- The trusted edge overwrites the geo header and the origin cannot be reached
+  through a path that preserves a client-supplied value.
+- The app serves the exact terms bytes hashed at boot; the production store
+  passes `test/compliance_store_test.exs` semantics.
+- Legal approved nullable session evidence, audit-event durability, retention,
+  export/deletion, and GDPR policy.
+- **Fail-closed launch warning:** exercise every route through its three-arity
+  handler with a non-empty country allowlist. Two-arity handlers and an empty
+  `SPEND_GEOFENCE_COUNTRIES` deny all users once compliance is configured.
 
 ## The testing bar
 
