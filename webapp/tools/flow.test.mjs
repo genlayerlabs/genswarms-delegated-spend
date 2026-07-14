@@ -4,7 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { configDrift, fetchOrder, ownerMismatch, runBindFlow, runPermitFlow, runUserTxFlow, shortAddress, walletDappLink, wrongWalletMessage } from "../lib/flow.mjs";
+import { configDrift, fetchOrder, ownerMismatch, runBindFlow, runPermitFlow, runUserTxFlow, shortAddress, termsRequired, walletDappLink, wrongWalletMessage } from "../lib/flow.mjs";
 import { buildGrantEnvelope } from "../lib/permit.mjs";
 
 const CONFIG = {
@@ -535,4 +535,178 @@ test("order chain_id matching config.chainId → flows unchanged (permit happy p
   const result = await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1");
   assert.equal(result.ok, true);
   assert.equal(result.status, "submitted");
+});
+
+// ── compliance status mappings + pre-action terms gates ───────────────────
+
+const TERMS = { required: true, version: "2026-07-01", text: "Terms" };
+
+test("termsRequired is true only for the literal required=true order state", () => {
+  assert.equal(termsRequired(), false);
+  assert.equal(termsRequired({}), false);
+  assert.equal(termsRequired({ terms: null }), false);
+  assert.equal(termsRequired({ terms: "malformed" }), false);
+  assert.equal(termsRequired({ terms: {} }), false);
+  assert.equal(termsRequired({ terms: { required: false } }), false);
+  assert.equal(termsRequired({ terms: { required: 1 } }), false);
+  assert.equal(termsRequired({ terms: { required: true } }), true);
+});
+
+test("fetchOrder maps 451 and 428 to exact compliance failures", async () => {
+  const gated = mockFetch({ orders: () => ({ status: 428, json: { terms: TERMS } }) });
+  assert.deepEqual(
+    await fetchOrder({ fetchFn: gated, config: CONFIG, initData: "x" }, "oref-1"),
+    { ok: false, reason: "terms_required", terms: TERMS }
+  );
+
+  const geo = mockFetch({ orders: () => ({ status: 451, json: { error: "blocked" } }) });
+  assert.deepEqual(
+    await fetchOrder({ fetchFn: geo, config: CONFIG, initData: "x" }, "oref-1"),
+    { ok: false, reason: "geo_blocked" }
+  );
+});
+
+test("grant POST maps 451 and 428 to exact compliance failures", async () => {
+  for (const [status, json, expected] of [
+    [428, { terms: TERMS }, { ok: false, reason: "terms_required", terms: TERMS }],
+    [451, { error: "blocked" }, { ok: false, reason: "geo_blocked" }],
+  ]) {
+    const provider = mockProvider();
+    const fetchFn = mockFetch({ ...happyRoutes, grants: () => ({ status, json }) });
+    assert.deepEqual(
+      await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1"),
+      expected
+    );
+  }
+});
+
+test("wallet POST maps 451 and 428 to exact compliance failures", async () => {
+  for (const [status, json, expected] of [
+    [428, { terms: TERMS }, { ok: false, reason: "terms_required", terms: TERMS }],
+    [451, { error: "blocked" }, { ok: false, reason: "geo_blocked" }],
+  ]) {
+    const provider = mockProvider();
+    const fetchFn = mockFetch({ orders: bindOrders, wallet: () => ({ status, json }) });
+    assert.deepEqual(
+      await runBindFlow({ provider, fetchFn, config: CONFIG, initData: "", token: "t" }, "b1"),
+      expected
+    );
+  }
+});
+
+test("permit required terms gate after connect/chain/owner but before nonce, signing, or grant POST", async () => {
+  let ownerChecks = 0;
+  const order = { ...ORDER, terms: TERMS };
+  Object.defineProperty(order, "expected_owner", {
+    enumerable: true,
+    get() {
+      ownerChecks += 1;
+      return ACCOUNT.toLowerCase();
+    },
+  });
+  const provider = mockProvider();
+  const fetchFn = mockFetch({ ...happyRoutes, orders: () => ({ status: 200, json: order }) });
+
+  assert.deepEqual(
+    await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1"),
+    { ok: false, reason: "terms_required", terms: TERMS, account: ACCOUNT }
+  );
+  assert.deepEqual(provider.calls.map(({ method }) => method), ["eth_requestAccounts", "eth_chainId"]);
+  assert.equal(ownerChecks, 1);
+  assert.deepEqual(fetchFn.posts.map(({ url }) => url), [`${CONFIG.intakeUrl}/orders`]);
+});
+
+test("user_tx required terms gate after connect/chain/owner but before send or submitted POST", async () => {
+  let ownerChecks = 0;
+  const order = {
+    order_ref: "r1",
+    kind: "user_tx",
+    amount: 0,
+    expires_at: 9_999_999_999,
+    tx: { to: "0x" + "11".repeat(20), data: "0xdeadbeef", value: 0 },
+    display: {},
+    terms: TERMS,
+  };
+  Object.defineProperty(order, "expected_owner", {
+    enumerable: true,
+    get() {
+      ownerChecks += 1;
+      return ACCOUNT.toLowerCase();
+    },
+  });
+  const provider = mockProvider({ eth_sendTransaction: () => "0x" + "ef".repeat(32) });
+  const fetchFn = mockFetch({
+    orders: () => ({ status: 200, json: order }),
+    submitted: () => ({ status: 200, json: { status: "noted" } }),
+  });
+
+  assert.deepEqual(
+    await runUserTxFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "r1"),
+    { ok: false, reason: "terms_required", terms: TERMS, account: ACCOUNT }
+  );
+  assert.deepEqual(provider.calls.map(({ method }) => method), ["eth_requestAccounts", "eth_chainId"]);
+  assert.equal(ownerChecks, 1);
+  assert.deepEqual(fetchFn.posts.map(({ url }) => url), [`${CONFIG.intakeUrl}/orders`]);
+});
+
+test("bind required terms gate after connect/chain but before wallet POST", async () => {
+  const provider = mockProvider();
+  const fetchFn = mockFetch({
+    orders: () => ({ status: 200, json: { ...BIND_ORDER, terms: TERMS } }),
+    wallet: () => ({ status: 200, json: { status: "bound", address: ACCOUNT } }),
+  });
+
+  assert.deepEqual(
+    await runBindFlow({ provider, fetchFn, config: CONFIG, initData: "", token: "t" }, "b1"),
+    { ok: false, reason: "terms_required", terms: TERMS, account: ACCOUNT }
+  );
+  assert.deepEqual(provider.calls.map(({ method }) => method), ["eth_requestAccounts", "eth_chainId"]);
+  assert.deepEqual(fetchFn.posts.map(({ url }) => url), [`${CONFIG.intakeUrl}/orders`]);
+});
+
+test("required terms do not outrank wrong-chain or wrong-wallet failures", async () => {
+  const wrongChainProvider = mockProvider({ eth_chainId: () => "0x1" });
+  const wrongChainFetch = mockFetch({
+    ...happyRoutes,
+    orders: () => ({ status: 200, json: { ...ORDER, terms: TERMS } }),
+  });
+  assert.deepEqual(
+    await runPermitFlow({ provider: wrongChainProvider, fetchFn: wrongChainFetch, config: CONFIG, initData: "x" }, "oref-1"),
+    { ok: false, reason: "wrong_chain", expected: CONFIG.chainId }
+  );
+
+  const bound = "0x000000000000000000000000000000000000dEaD";
+  const wrongWalletProvider = mockProvider();
+  const wrongWalletFetch = mockFetch({
+    ...happyRoutes,
+    orders: () => ({ status: 200, json: { ...ORDER, terms: TERMS, expected_owner: bound } }),
+  });
+  assert.deepEqual(
+    await runPermitFlow({ provider: wrongWalletProvider, fetchFn: wrongWalletFetch, config: CONFIG, initData: "x" }, "oref-1"),
+    { ok: false, reason: "wrong_wallet", expected: bound }
+  );
+});
+
+test("geo-blocked order fetch is terminal before any provider interaction", async () => {
+  const provider = mockProvider();
+  const fetchFn = mockFetch({ ...happyRoutes, orders: () => ({ status: 451, json: {} }) });
+
+  assert.deepEqual(
+    await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1"),
+    { ok: false, reason: "geo_blocked" }
+  );
+  assert.equal(provider.calls.length, 0);
+});
+
+test("required=false terms preserve the permit happy path", async () => {
+  const provider = mockProvider();
+  const fetchFn = mockFetch({
+    ...happyRoutes,
+    orders: () => ({ status: 200, json: { ...ORDER, terms: { required: false } } }),
+  });
+
+  assert.deepEqual(
+    await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1"),
+    { ok: true, status: "submitted", tx: "0xabc" }
+  );
 });

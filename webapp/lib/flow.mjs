@@ -44,6 +44,10 @@ export function configDrift(order, config) {
   return runtime !== (config && config.chainId);
 }
 
+export function termsRequired(order) {
+  return order?.terms?.required === true;
+}
+
 /**
  * Owner-bound orders (`order.expected_owner`): true when a connected account
  * is NOT the wallet the order is bound to (case-insensitive). Unbound orders
@@ -75,6 +79,8 @@ export async function fetchOrder(deps, orderRef) {
   if (res.status === 401) return { ok: false, reason: "unauthorized" };
   if (res.status === 409) return { ok: false, reason: "version_mismatch" };
   if (res.status === 410) return { ok: false, reason: "expired" };
+  if (res.status === 451) return { ok: false, reason: "geo_blocked" };
+  if (res.status === 428) return { ok: false, reason: "terms_required", terms: (await res.json()).terms };
   if (res.status !== 200) return { ok: false, reason: `http_${res.status}` };
   return { ok: true, order: await res.json() };
 }
@@ -135,7 +141,9 @@ export async function signAndSubmit(deps, { orderRef, order, account, nonce }) {
 
   if (res.status === 409) return { ok: false, reason: "version_mismatch" };
   if (res.status === 401) return { ok: false, reason: "unauthorized" };
+  if (res.status === 451) return { ok: false, reason: "geo_blocked" };
   const body = await res.json();
+  if (res.status === 428) return { ok: false, reason: "terms_required", terms: body.terms };
   if (res.status !== 200) return { ok: false, reason: body.reason || body.error || `http_${res.status}` };
   return { ok: true, status: body.status, tx: body.tx };
 }
@@ -158,6 +166,8 @@ export async function runPermitFlow(deps, orderRef) {
     return { ok: false, reason: "wrong_chain", expected: deps.config.chainId };
   if (ownerMismatch(fetched.order, conn.account))
     return { ok: false, reason: "wrong_wallet", expected: fetched.order.expected_owner };
+  if (termsRequired(fetched.order))
+    return { ok: false, reason: "terms_required", terms: fetched.order.terms, account: conn.account };
 
   const nonce = await fetchPermitNonce(deps, conn.account);
 
@@ -186,6 +196,8 @@ export async function runUserTxFlow(deps, orderRef) {
   // wallet (and sells revert on-chain). Refuse before the wallet ever opens.
   if (ownerMismatch(fetched.order, conn.account))
     return { ok: false, reason: "wrong_wallet", expected: fetched.order.expected_owner };
+  if (termsRequired(fetched.order))
+    return { ok: false, reason: "terms_required", terms: fetched.order.terms, account: conn.account };
 
   let tx;
   try {
@@ -229,6 +241,8 @@ export async function runBindFlow(deps, bindRef) {
   if (!conn.ok) return conn;
   if (conn.chainId !== deps.config.chainId)
     return { ok: false, reason: "wrong_chain", expected: deps.config.chainId };
+  if (termsRequired(fetched.order))
+    return { ok: false, reason: "terms_required", terms: fetched.order.terms, account: conn.account };
 
   const res = await deps.fetchFn(`${deps.config.intakeUrl}/wallet`, {
     method: "POST",
@@ -238,7 +252,9 @@ export async function runBindFlow(deps, bindRef) {
   if (res.status === 401) return { ok: false, reason: "unauthorized" };
   if (res.status === 409) return { ok: false, reason: "version_mismatch" };
   if (res.status === 410) return { ok: false, reason: "expired" };
+  if (res.status === 451) return { ok: false, reason: "geo_blocked" };
   const body = await res.json();
+  if (res.status === 428) return { ok: false, reason: "terms_required", terms: body.terms };
   if (res.status !== 200) return { ok: false, reason: body.error || `http_${res.status}` };
   return { ok: true, address: body.address };
 }
