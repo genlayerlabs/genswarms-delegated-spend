@@ -82,13 +82,24 @@ export function showTermsPrompt(deps, { account, terms, ref, retry }, get = $, a
       result = { ok: false, reason: "request_failed" };
     }
     if (result.ok) {
+      let refreshed;
       try {
-        const refreshed = await fetchOrder(deps, ref);
-        if (refreshed.ok) showManual(refreshed.order, get);
-      } catch (_) {}
+        refreshed = await fetchOrder(deps, ref);
+      } catch (_) {
+        refreshed = { ok: false, reason: "request_failed" };
+      }
+      if (refreshed.ok && configDrift(refreshed.order, deps.config)) {
+        box.hidden = true;
+        pay.hidden = true;
+        get("manual").hidden = true;
+        button.disabled = true;
+        paintStatus(status, MESSAGES.config_drift, "error");
+        return;
+      }
+      if (refreshed.ok) showManual(refreshed.order, get);
       box.hidden = true;
       pay.hidden = false;
-      await retry();
+      await retry(refreshed);
     } else if (result.reason === "terms_stale") {
       currentTerms = result.terms;
       get("terms-link").href = currentTerms.url;
@@ -190,10 +201,10 @@ async function setupPermit(deps, order, orderRef, tg) {
   if (!(await enforceOwnerAtLoad(deps, order))) return;
   $("pay").disabled = false;
 
-  $("pay").onclick = async () => {
+  const run = async (fetched) => {
     $("pay").disabled = true;
     paintStatus($("status"), "Connecting wallet…");
-    const result = await runPermitFlow(deps, orderRef);
+    const result = await runPermitFlow(deps, orderRef, fetched);
 
     if (result.ok) {
       paintStatus($("status"), "Payment submitted ✓ — you can return to the chat.", "success");
@@ -201,7 +212,7 @@ async function setupPermit(deps, order, orderRef, tg) {
     } else if (result.reason === "wrong_wallet") {
       blockWrongWallet(result.expected);
     } else if (result.reason === "terms_required") {
-      showTermsPrompt(deps, { account: result.account, terms: result.terms, ref: orderRef, retry: $("pay").onclick });
+      showTermsPrompt(deps, { account: result.account, terms: result.terms, ref: orderRef, retry: run });
     } else if (result.reason === "geo_blocked") {
       enterGeoDeadState($("status"));
     } else {
@@ -209,6 +220,7 @@ async function setupPermit(deps, order, orderRef, tg) {
       $("pay").disabled = false;
     }
   };
+  $("pay").onclick = () => run();
 }
 
 async function setupUserTx(deps, order, orderRef, tg) {
@@ -216,17 +228,17 @@ async function setupUserTx(deps, order, orderRef, tg) {
   $("pay").textContent = "Review & sign in wallet";
   if (!(await enforceOwnerAtLoad(deps, order))) return;
   $("pay").disabled = false;
-  $("pay").onclick = async () => {
+  const run = async (fetched) => {
     $("pay").disabled = true;
     paintStatus($("status"), "Opening wallet…");
-    const result = await runUserTxFlow(deps, orderRef);
+    const result = await runUserTxFlow(deps, orderRef, fetched);
     if (result.ok) {
       paintStatus($("status"), "Transaction sent ✓ — you can return to the chat.", "success");
       if (tg) setTimeout(() => tg.close(), 1500);
     } else if (result.reason === "wrong_wallet") {
       blockWrongWallet(result.expected);
     } else if (result.reason === "terms_required") {
-      showTermsPrompt(deps, { account: result.account, terms: result.terms, ref: orderRef, retry: $("pay").onclick });
+      showTermsPrompt(deps, { account: result.account, terms: result.terms, ref: orderRef, retry: run });
     } else if (result.reason === "geo_blocked") {
       enterGeoDeadState($("status"));
     } else {
@@ -234,6 +246,7 @@ async function setupUserTx(deps, order, orderRef, tg) {
       $("pay").disabled = false;
     }
   };
+  $("pay").onclick = () => run();
 }
 
 function setupBind(deps, order, bindRef, tg) {
@@ -242,15 +255,15 @@ function setupBind(deps, order, bindRef, tg) {
     : "No wallet on file yet.";
   $("pay").textContent = "Connect wallet";
   $("pay").disabled = false;
-  $("pay").onclick = async () => {
+  const run = async (fetched) => {
     $("pay").disabled = true;
     paintStatus($("status"), "Connecting wallet…");
-    const result = await runBindFlow(deps, bindRef);
+    const result = await runBindFlow(deps, bindRef, fetched);
     if (result.ok) {
       paintStatus($("status"), "Wallet bound ✓ — you can return to the chat.", "success");
       if (tg) setTimeout(() => tg.close(), 1500);
     } else if (result.reason === "terms_required") {
-      showTermsPrompt(deps, { account: result.account, terms: result.terms, ref: bindRef, retry: $("pay").onclick });
+      showTermsPrompt(deps, { account: result.account, terms: result.terms, ref: bindRef, retry: run });
     } else if (result.reason === "geo_blocked") {
       enterGeoDeadState($("status"));
     } else {
@@ -258,6 +271,7 @@ function setupBind(deps, order, bindRef, tg) {
       $("pay").disabled = false;
     }
   };
+  $("pay").onclick = () => run();
 }
 
 function summaryLines(order) {

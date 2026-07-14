@@ -215,8 +215,8 @@ export async function signAndSubmit(deps, { orderRef, order, account, nonce }) {
  * the order's runtime chain id first. The wallet-vs-config chain check is
  * unchanged — it now runs only when order and config already agree.
  */
-export async function runPermitFlow(deps, orderRef) {
-  const fetched = await fetchOrder(deps, orderRef);
+export async function runPermitFlow(deps, orderRef, fetched = null) {
+  fetched ??= await fetchOrder(deps, orderRef);
   if (!fetched.ok) return fetched;
   if (configDrift(fetched.order, deps.config)) return { ok: false, reason: "config_drift" };
 
@@ -239,10 +239,10 @@ export async function runPermitFlow(deps, orderRef) {
   });
 }
 
-export async function runUserTxFlow(deps, orderRef) {
+export async function runUserTxFlow(deps, orderRef, fetched = null) {
   // Fetch-before-connect, same as runPermitFlow: config drift must block
   // before the wallet is ever touched.
-  const fetched = await fetchOrder(deps, orderRef);
+  fetched ??= await fetchOrder(deps, orderRef);
   if (!fetched.ok) return fetched;
   if (configDrift(fetched.order, deps.config)) return { ok: false, reason: "config_drift" };
   if (fetched.order.kind !== "user_tx") return { ok: false, reason: "wrong_kind" };
@@ -287,13 +287,13 @@ function hexQuantity(value) {
   throw new Error("bad quantity");
 }
 
-export async function runBindFlow(deps, bindRef) {
+export async function runBindFlow(deps, bindRef, fetched = null) {
   // Bind pages consume config too (chain gate below), so the drift guard
   // applies here as well: fetch the bind order's view first and refuse a
   // drifted deployment before the wallet is connected — a healthy-looking
   // bind page on top of an inconsistent deployment feeds wallets into flows
   // that would then pay on the wrong network.
-  const fetched = await fetchOrder(deps, bindRef);
+  fetched ??= await fetchOrder(deps, bindRef);
   if (!fetched.ok) return fetched;
   if (configDrift(fetched.order, deps.config)) return { ok: false, reason: "config_drift" };
 

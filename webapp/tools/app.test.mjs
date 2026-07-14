@@ -105,7 +105,51 @@ test("accepted terms restore the server-authorized manual fallback before retry"
       json: async () => ({ kind: "permit", display: { manual } }),
     }),
   };
+  let retriedWith;
+
+  showTermsPrompt(
+    deps,
+    {
+      account: ACCOUNT,
+      terms: { url: "https://example.test/terms", v_hash: HASH },
+      ref: "oref-1",
+      retry: async (fetched) => { retriedWith = fetched; },
+    },
+    get,
+    async () => ({ ok: true, status: "accepted", vHash: HASH })
+  );
+
+  await elements["terms-accept"].onclick();
+
+  assert.equal(elements.manual.hidden, false);
+  assert.equal(elements["manual-address"].textContent, manual.address);
+  assert.equal(elements["manual-amount"].textContent, "Send exactly 2.50 USDC on Base to:");
+  assert.deepEqual(retriedWith, {
+    ok: true,
+    order: { kind: "permit", display: { manual } },
+  });
+});
+
+test("accepted terms keep every action hidden when the refreshed order has config drift", async () => {
+  const { elements, get } = fakeDom();
   let retries = 0;
+  const deps = {
+    config: { intakeUrl: "/spend", version: "0.5.0", chainId: 84_532 },
+    initData: "signed-init-data",
+    fetchFn: async () => ({
+      status: 200,
+      json: async () => ({
+        kind: "permit",
+        chain_id: 1,
+        display: {
+          manual: {
+            address: "0x0000000000000000000000000000000000000001",
+            amount: 2_500_000,
+          },
+        },
+      }),
+    }),
+  };
 
   showTermsPrompt(
     deps,
@@ -121,10 +165,13 @@ test("accepted terms restore the server-authorized manual fallback before retry"
 
   await elements["terms-accept"].onclick();
 
-  assert.equal(elements.manual.hidden, false);
-  assert.equal(elements["manual-address"].textContent, manual.address);
-  assert.equal(elements["manual-amount"].textContent, "Send exactly 2.50 USDC on Base to:");
-  assert.equal(retries, 1);
+  assert.equal(elements.manual.hidden, true);
+  assert.equal(elements.pay.hidden, true);
+  assert.equal(elements.terms.hidden, true);
+  assert.equal(elements["terms-accept"].disabled, true);
+  assert.equal(elements.status.textContent, MESSAGES.config_drift);
+  assert.equal(elements.status.dataset.state, "error");
+  assert.equal(retries, 0);
 });
 
 test("stale terms replace the hash and require a second signature click", async () => {

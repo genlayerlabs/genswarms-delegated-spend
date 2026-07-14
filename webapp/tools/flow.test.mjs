@@ -713,6 +713,41 @@ test("required=false terms preserve the permit happy path", async () => {
   );
 });
 
+test("permit retry reuses one successful authoritative order fetch", async () => {
+  const provider = mockProvider();
+  const fetchFn = mockFetch(happyRoutes);
+
+  assert.deepEqual(
+    await runPermitFlow(
+      { provider, fetchFn, config: CONFIG, initData: "x" },
+      "oref-1",
+      { ok: true, order: ORDER }
+    ),
+    { ok: true, status: "submitted", tx: "0xabc" }
+  );
+  assert.equal(fetchFn.posts.filter(({ url }) => url.endsWith("/orders")).length, 0);
+  assert.equal(fetchFn.posts.filter(({ url }) => url.endsWith("/grants")).length, 1);
+});
+
+test("all retries reuse an authoritative order-fetch failure without another request", async () => {
+  const fetched = { ok: false, reason: "http_429" };
+
+  for (const [flow, ref] of [
+    [runPermitFlow, "oref-1"],
+    [runUserTxFlow, "oref-1"],
+    [runBindFlow, "b1"],
+  ]) {
+    const provider = mockProvider();
+    const fetchFn = async () => { throw new Error("unexpected duplicate fetch"); };
+
+    assert.deepEqual(
+      await flow({ provider, fetchFn, config: CONFIG, initData: "x" }, ref, fetched),
+      fetched
+    );
+    assert.equal(provider.calls.length, 0);
+  }
+});
+
 // ── terms acceptance ───────────────────────────────────────────────────────
 
 const TERMS_HASH = "0x" + "33".repeat(32);
