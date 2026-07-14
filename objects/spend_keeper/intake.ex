@@ -112,12 +112,26 @@ defmodule DelegatedSpend.Intake do
 
         {:ok, permit} ->
           case Keeper.execute_with_permit(ctx.keeper, order_ref, user_ref, permit) do
-            :pending -> {200, %{"status" => "pending"}}
-            {:submitted, hash} -> {200, %{"status" => "submitted", "tx" => hash}}
-            {:mined, hash} -> {200, %{"status" => "mined", "tx" => hash}}
-            {:failed, :not_found} -> {404, %{"error" => "not found"}}
-            {:failed, reason} -> {422, %{"status" => "failed", "reason" => to_string(reason)}}
-            :unknown -> {404, %{"error" => "not found"}}
+            :pending ->
+              record_event(ctx, user_ref, "grant_submitted", permit.owner, order_ref, meta)
+              {200, %{"status" => "pending"}}
+
+            {:submitted, hash} ->
+              record_event(ctx, user_ref, "grant_submitted", permit.owner, order_ref, meta)
+              {200, %{"status" => "submitted", "tx" => hash}}
+
+            {:mined, hash} ->
+              record_event(ctx, user_ref, "grant_submitted", permit.owner, order_ref, meta)
+              {200, %{"status" => "mined", "tx" => hash}}
+
+            {:failed, :not_found} ->
+              {404, %{"error" => "not found"}}
+
+            {:failed, reason} ->
+              {422, %{"status" => "failed", "reason" => to_string(reason)}}
+
+            :unknown ->
+              {404, %{"error" => "not found"}}
           end
       end
     else
@@ -143,8 +157,12 @@ defmodule DelegatedSpend.Intake do
       # fail-closed): a rejected or crashing wallet_fn burns it and the user
       # asks for a fresh bind link — a failure is never replayable.
       case safe_wallet(wallet_fn, user_ref, address, bind_ref) do
-        :ok -> {200, %{"status" => "bound", "address" => address}}
-        _ -> {422, %{"error" => "bind rejected"}}
+        :ok ->
+          record_event(ctx, user_ref, "wallet_bound", address, bind_ref, meta)
+          {200, %{"status" => "bound", "address" => address}}
+
+        _ ->
+          {422, %{"error" => "bind rejected"}}
       end
     else
       {:error, status, body} -> {status, body}
@@ -167,6 +185,15 @@ defmodule DelegatedSpend.Intake do
         fun when is_function(fun, 2) -> safe_submitted(fun, order.order_id, tx_hash)
         _ -> :ok
       end
+
+      record_event(
+        ctx,
+        user_ref,
+        "tx_submitted",
+        Map.get(order, :expected_owner),
+        order_ref,
+        meta
+      )
 
       {200, %{"status" => "noted"}}
     else
@@ -295,6 +322,29 @@ defmodule DelegatedSpend.Intake do
     _ -> :error
   catch
     _, _ -> :error
+  end
+
+  defp record_event(ctx, user_ref, kind, wallet, order_ref, meta) do
+    event = %{
+      user_ref: user_ref,
+      kind: kind,
+      at: System.os_time(:second),
+      meta: Store.normalize_meta(meta),
+      wallet: wallet,
+      order_ref: order_ref
+    }
+
+    case ctx do
+      %{compliance: %{store: {module, ref}}} when is_atom(module) ->
+        module.record_event(ref, event)
+
+      _ ->
+        :ok
+    end
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   defp stringify(map) when is_map(map),
