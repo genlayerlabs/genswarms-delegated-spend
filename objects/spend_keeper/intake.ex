@@ -29,7 +29,9 @@ defmodule DelegatedSpend.Intake do
   alias DelegatedSpend.Keeper
 
   @doc "GET /orders?order_ref=… — fetch a pending order for the verified user."
-  def handle_order(params, ctx) when is_map(params) do
+  def handle_order(params, ctx) when is_map(params), do: handle_order(params, %{}, ctx)
+
+  def handle_order(params, _meta, ctx) when is_map(params) do
     order_ref = to_string(params["order_ref"] || "")
 
     with :ok <- pin_version(params, ctx),
@@ -88,7 +90,9 @@ defmodule DelegatedSpend.Intake do
   POST /grants — permit envelope for a pending order. Validates strictly
   against pinned config, then hands to the keeper for execution.
   """
-  def handle_grant(params, ctx) when is_map(params) do
+  def handle_grant(params, ctx) when is_map(params), do: handle_grant(params, %{}, ctx)
+
+  def handle_grant(params, _meta, ctx) when is_map(params) do
     order_ref = to_string(params["order_ref"] || "")
 
     with {:ok, user_ref} <- authenticate(params, ctx, order_ref),
@@ -119,7 +123,9 @@ defmodule DelegatedSpend.Intake do
   end
 
   @doc "POST /wallet — bind a connected wallet address through a bind order."
-  def handle_wallet(params, ctx) when is_map(params) do
+  def handle_wallet(params, ctx) when is_map(params), do: handle_wallet(params, %{}, ctx)
+
+  def handle_wallet(params, _meta, ctx) when is_map(params) do
     bind_ref = to_string(params["bind_ref"] || "")
 
     with :ok <- pin_version(params, ctx),
@@ -142,7 +148,9 @@ defmodule DelegatedSpend.Intake do
   end
 
   @doc "POST /orders/submitted — best-effort user_tx hash report; watcher hint only."
-  def handle_submitted(params, ctx) when is_map(params) do
+  def handle_submitted(params, ctx) when is_map(params), do: handle_submitted(params, %{}, ctx)
+
+  def handle_submitted(params, _meta, ctx) when is_map(params) do
     order_ref = to_string(params["order_ref"] || "")
 
     with :ok <- pin_version(params, ctx),
