@@ -12,6 +12,7 @@ function fakeDom() {
     "terms-link": { href: "" },
     "terms-accept": { disabled: false, onclick: null },
     pay: { hidden: false, disabled: false },
+    manual: { hidden: false },
     status: { textContent: "", dataset: {} },
   };
   return { elements, get: (id) => elements[id] };
@@ -79,6 +80,7 @@ test("terms prompt wires URL/hash/ref/account and retries the original action af
   assert.equal(elements["terms-link"].href, "https://example.test/terms");
   assert.equal(elements.pay.hidden, true);
   assert.equal(elements.pay.disabled, true);
+  assert.equal(elements.manual.hidden, true);
 
   await elements["terms-accept"].onclick();
   assert.deepEqual(calls, [{ deps, args: { account: ACCOUNT, vHash: HASH, ref: "oref-1" } }]);
@@ -90,12 +92,13 @@ test("terms prompt wires URL/hash/ref/account and retries the original action af
 test("stale terms replace the hash and require a second signature click", async () => {
   const { elements, get } = fakeDom();
   const currentHash = "0x" + "22".repeat(32);
+  const currentTerms = { v_hash: currentHash, url: "https://example.test/terms-v2" };
   const signedHashes = [];
   let retries = 0;
   const acceptFn = async (_deps, { vHash }) => {
     signedHashes.push(vHash);
     return signedHashes.length === 1
-      ? { ok: false, reason: "terms_stale", vHash: currentHash }
+      ? { ok: false, reason: "terms_stale", terms: currentTerms }
       : { ok: true, status: "accepted", vHash: currentHash };
   };
 
@@ -110,6 +113,7 @@ test("stale terms replace the hash and require a second signature click", async 
   assert.deepEqual(signedHashes, [HASH]);
   assert.equal(elements.status.textContent, MESSAGES.terms_stale);
   assert.equal(elements.status.dataset.state, "error");
+  assert.equal(elements["terms-link"].href, currentTerms.url);
   assert.equal(elements["terms-accept"].disabled, false);
   assert.equal(retries, 0);
 
@@ -133,6 +137,7 @@ test("geo-blocked acceptance enters a terminal error state and hides every actio
   assert.equal(elements.status.dataset.state, "error");
   assert.equal(elements.terms.hidden, true);
   assert.equal(elements.pay.hidden, true);
+  assert.equal(elements.manual.hidden, true);
   assert.equal(elements["terms-accept"].disabled, true);
   assert.equal(retries, 0);
 });

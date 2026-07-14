@@ -372,9 +372,9 @@ Money-lane bookkeeping should not be in-memory-only in production —
   `config.json` disagrees — moving `RPC_URL` to another chain without
   redeploying the dapp is a fund-loss class misdeploy, not a UX nit.
 
-- **Intake mounted.** The package ships PURE handlers —
+- **Intake mounted.** The package ships five PURE handlers —
   `DelegatedSpend.Intake.handle_order/2`, `handle_grant/2`,
-  `handle_wallet/2`, and `handle_submitted/2`, each
+  `handle_wallet/2`, `handle_submitted/2`, and `handle_terms/2`, each
   `params → {status, body_map}` — and YOU supply the HTTP serving and the
   fail-closed bind (loopback unless explicitly published). The ctx:
 
@@ -392,10 +392,11 @@ Money-lane bookkeeping should not be in-memory-only in production —
   ```
 
   The wallet dapp POSTs `{intakeUrl}/orders`, `{intakeUrl}/grants`,
-  `{intakeUrl}/wallet`, and `{intakeUrl}/orders/submitted` with either
-  `token` or `init_data` plus `v` in the body. A ~60-line Plug over Bandit is
-  all the serving glue takes: route first, cap the body (64 kB → 413),
-  decode-error → 400 — auth still happens inside the handlers.
+  `{intakeUrl}/wallet`, `{intakeUrl}/orders/submitted`, and, when compliance
+  is enabled, `{intakeUrl}/terms`, with either `token` or `init_data` plus `v`
+  in the body. A ~60-line Plug over Bandit is all the serving glue takes:
+  route first, cap the body (64 kB → 413), decode-error → 400 — auth still
+  happens inside the handlers.
 
 - **Keeper key provisioned.** The keeper signs with its OWN key
   (`SPEND_KEEPER_PRIVATE_KEY` in the template) — **never** the app's
@@ -488,6 +489,10 @@ Implement the four `DelegatedSpend.Compliance.Store` callbacks:
 `events_for/2`. The executable adapter specification is
 `test/compliance_store_test.exs`. The app's `tg_ci` is the blinded, opaque
 `user_ref`; it is never a raw Telegram or other platform identifier.
+
+Production adapters must make `record_acceptance/2` atomic first-write-wins
+per `{user_ref, v_hash}` without overwriting the original evidence, and must
+make `record_event/2` append-only.
 
 `record_event` is best-effort because it runs after an already-executed money
 operation. Persist the audit kinds `wallet_bound`, `grant_submitted`, and

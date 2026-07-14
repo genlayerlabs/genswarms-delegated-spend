@@ -5,6 +5,10 @@ defmodule DelegatedSpend.Compliance.Store do
   Only opaque or blinded `user_ref` values are allowed. Adapters must never
   store or log raw initData, tokens, Telegram or platform ids, or
   authentication bodies.
+
+  `record_acceptance/2` must be atomic first-write-wins per
+  `{user_ref, v_hash}` and must never overwrite the original evidence.
+  `record_event/2` must append each event without replacing earlier events.
   """
 
   @type meta :: %{

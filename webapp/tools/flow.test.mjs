@@ -891,8 +891,9 @@ test("acceptTerms does not confirm a 200 without the accepted status and hash", 
 
 test("acceptTerms maps stale/current hash, compliance, validation, and generic HTTP failures", async () => {
   const currentHash = "0x" + "44".repeat(32);
+  const currentTerms = { v_hash: currentHash, url: "https://example.test/terms-v2" };
   const cases = [
-    [409, { error: "terms_stale", v_hash: currentHash }, { ok: false, reason: "terms_stale", vHash: currentHash }],
+    [409, { error: "terms_stale", v_hash: currentHash, terms: currentTerms }, { ok: false, reason: "terms_stale", terms: currentTerms }],
     [451, { error: "geo_blocked" }, { ok: false, reason: "geo_blocked" }],
     [401, { error: "unauthorized" }, { ok: false, reason: "unauthorized" }],
     [409, { error: "version mismatch" }, { ok: false, reason: "version_mismatch" }],
@@ -910,6 +911,26 @@ test("acceptTerms maps stale/current hash, compliance, validation, and generic H
         { account: ACCOUNT, vHash: TERMS_HASH, ref: "oref-1" }
       ),
       expected
+    );
+  }
+});
+
+test("acceptTerms rejects stale responses without one matching current hash and URL", async () => {
+  const currentHash = "0x" + "44".repeat(32);
+  const malformed = [
+    { error: "terms_stale", v_hash: currentHash },
+    { error: "terms_stale", v_hash: currentHash, terms: { v_hash: currentHash } },
+    { error: "terms_stale", v_hash: currentHash, terms: { v_hash: TERMS_HASH, url: "https://example.test/terms-v2" } },
+  ];
+
+  for (const json of malformed) {
+    const fetchFn = mockFetch({ terms: () => ({ status: 409, json }) });
+    assert.deepEqual(
+      await acceptTerms(
+        { provider: mockProvider(), fetchFn, config: CONFIG, initData: "x", nowFn: () => 0 },
+        { account: ACCOUNT, vHash: TERMS_HASH, ref: "oref-1" }
+      ),
+      { ok: false, reason: "invalid_response" }
     );
   }
 });

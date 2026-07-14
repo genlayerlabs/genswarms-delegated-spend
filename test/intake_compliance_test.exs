@@ -199,6 +199,45 @@ defmodule DelegatedSpend.IntakeComplianceTest do
     assert ComplianceStore.get_acceptance(store, @user_ref, @terms_hash) == persisted
   end
 
+  test "mixed-case configured hash is canonical across responses, persistence, and lookups", %{
+    ctx: ctx,
+    compliance_store: store,
+    keeper: keeper
+  } do
+    canonical_hash = Terms.hash_terms("mixed-case configured terms")
+    assert canonical_hash =~ ~r/[a-f]/
+    mixed_hash = "0x" <> (canonical_hash |> String.slice(2..-1//1) |> String.upcase())
+    ctx = put_in(ctx, [:compliance, :terms, :hash], mixed_hash)
+    ref = register_order(keeper)
+    order = order_params(ctx, ref)
+    terms_url = @terms.url
+
+    assert {200, %{"terms" => %{"required" => true, "v_hash" => ^canonical_hash}}} =
+             Intake.handle_order(order, %{country: "US"}, ctx)
+
+    stale = signed_acceptance(ctx, %{"v_hash" => @old_terms_hash})
+
+    assert {409,
+            %{
+              "error" => "terms_stale",
+              "v_hash" => ^canonical_hash,
+              "terms" => %{"v_hash" => ^canonical_hash, "url" => ^terms_url}
+            }} = Intake.handle_terms(terms_params(ctx, ref, stale), %{country: "US"}, ctx)
+
+    current = signed_acceptance(ctx, %{"v_hash" => canonical_hash})
+
+    assert {200, %{"status" => "accepted", "v_hash" => ^canonical_hash}} =
+             Intake.handle_terms(terms_params(ctx, ref, current), %{country: "US"}, ctx)
+
+    assert %{v_hash: ^canonical_hash} =
+             ComplianceStore.get_acceptance(store, @user_ref, canonical_hash)
+
+    assert ComplianceStore.get_acceptance(store, @user_ref, mixed_hash) == nil
+
+    assert {200, %{"terms" => %{"required" => false, "v_hash" => ^canonical_hash}}} =
+             Intake.handle_order(order, %{country: "US"}, ctx)
+  end
+
   test "token authentication is bound to the request ref", %{
     ctx: ctx,
     compliance_store: store,
@@ -260,7 +299,12 @@ defmodule DelegatedSpend.IntakeComplianceTest do
       {put_in(base, ["acceptance", "issued_at"], valid["issued_at"] - 901),
        {422, %{"error" => "invalid", "field" => "issued_at"}}},
       {Map.put(base, "acceptance", stale),
-       {409, %{"error" => "terms_stale", "v_hash" => @terms_hash}}},
+       {409,
+        %{
+          "error" => "terms_stale",
+          "v_hash" => @terms_hash,
+          "terms" => %{"v_hash" => @terms_hash, "url" => @terms.url}
+        }}},
       {put_in(base, ["acceptance", "sig", "r"], "0x" <> String.duplicate("00", 32)),
        {422, %{"error" => "invalid", "field" => "sig"}}},
       {put_in(base, ["acceptance", "issued_at"], valid["issued_at"] + 1),
@@ -384,11 +428,21 @@ defmodule DelegatedSpend.IntakeComplianceTest do
     compliance_store: store,
     keeper: keeper
   } do
-    ref = register_order(keeper)
+    manual = %{address: "0x0000000000000000000000000000000000000001", amount: 1_000_000}
+
+    {:ok, %{order_ref: ref}} =
+      Keeper.register_order(keeper, "market_phase", %{
+        user_ref: @user_ref,
+        amount: 1_000_000,
+        action_args: [],
+        display: %{manual: manual}
+      })
+
     params = order_params(ctx, ref)
 
     assert {200,
             %{
+              "display" => gated_display,
               "terms" => %{
                 "required" => true,
                 "v_hash" => @terms_hash,
@@ -396,16 +450,21 @@ defmodule DelegatedSpend.IntakeComplianceTest do
               }
             }} = Intake.handle_order(params, %{country: "US"}, ctx)
 
+    refute Map.has_key?(gated_display, "manual")
+
     :ok = ComplianceStore.record_acceptance(store, acceptance(@user_ref, @terms_hash))
 
     assert {200,
             %{
+              "display" => %{"manual" => stringified_manual},
               "terms" => %{
                 "required" => false,
                 "v_hash" => @terms_hash,
                 "url" => "https://example.test/terms-v2"
               }
             }} = Intake.handle_order(params, %{country: "US"}, ctx)
+
+    assert stringified_manual == Map.new(manual, fn {key, value} -> {to_string(key), value} end)
 
     assert ComplianceStore.events_for(store, @user_ref) == []
   end

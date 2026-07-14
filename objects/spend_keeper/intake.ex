@@ -47,6 +47,13 @@ defmodule DelegatedSpend.Intake do
           if expired_user_tx?(view) do
             {410, %{"error" => "expired"}}
           else
+            display = stringify(view.display)
+
+            display =
+              if terms && terms["required"] == true && is_map(display),
+                do: Map.delete(display, "manual"),
+                else: display
+
             base = %{
               "order_ref" => view.order_ref,
               "kind" => view.kind,
@@ -56,7 +63,7 @@ defmodule DelegatedSpend.Intake do
               # the dapp fails CLOSED when its static config.json disagrees
               # (config drift — nothing may be signed on a mismatched chain).
               "chain_id" => view.chain_id,
-              "display" => stringify(view.display)
+              "display" => display
             }
 
             # Owner-bound orders carry the wallet they must be paid from (an
@@ -295,12 +302,12 @@ defmodule DelegatedSpend.Intake do
 
   defp acceptance_config(%{
          compliance: %{
-           terms: %{hash: "0x" <> hex, url: url} = terms,
+           terms: terms,
            store: {module, store_ref}
          }
        })
-       when is_atom(module) and byte_size(hex) == 64 and is_binary(url) and byte_size(url) > 0 do
-    with {:ok, _bytes} <- Base.decode16(hex, case: :mixed),
+       when is_atom(module) do
+    with {:ok, terms} <- canonical_terms(terms),
          true <- Code.ensure_loaded?(module),
          true <- function_exported?(module, :record_acceptance, 2) do
       {:ok, terms, module, store_ref}
@@ -322,8 +329,16 @@ defmodule DelegatedSpend.Intake do
     _, _ -> @unavailable
   end
 
-  defp terms_stale(%{compliance: %{terms: %{hash: hash}}}),
-    do: {409, %{"error" => "terms_stale", "v_hash" => hash}}
+  defp terms_stale(%{compliance: %{terms: terms}}) do
+    with {:ok, %{hash: hash, url: url}} <- canonical_terms(terms) do
+      {409,
+       %{
+         "error" => "terms_stale",
+         "v_hash" => hash,
+         "terms" => %{"v_hash" => hash, "url" => url}
+       }}
+    end
+  end
 
   defp invalid(field), do: {422, %{"error" => "invalid", "field" => to_string(field)}}
 
@@ -366,11 +381,11 @@ defmodule DelegatedSpend.Intake do
 
   defp read_terms_state(
          %{store: {module, ref}},
-         %{hash: "0x" <> hex = hash, url: url},
+         terms,
          user_ref
        )
-       when is_atom(module) and byte_size(hex) == 64 and is_binary(url) and byte_size(url) > 0 do
-    with {:ok, _} <- Base.decode16(hex, case: :mixed),
+       when is_atom(module) do
+    with {:ok, %{hash: hash, url: url}} <- canonical_terms(terms),
          true <- Code.ensure_loaded?(module),
          true <- function_exported?(module, :get_acceptance, 3) do
       case apply(module, :get_acceptance, [ref, user_ref, hash]) do
@@ -393,6 +408,16 @@ defmodule DelegatedSpend.Intake do
   end
 
   defp read_terms_state(_compliance, _terms, _user_ref), do: @unavailable
+
+  defp canonical_terms(%{hash: "0x" <> hex, url: url} = terms)
+       when byte_size(hex) == 64 and is_binary(url) and byte_size(url) > 0 do
+    case Base.decode16(hex, case: :mixed) do
+      {:ok, bytes} -> {:ok, %{terms | hash: "0x" <> Base.encode16(bytes, case: :lower)}}
+      :error -> @unavailable
+    end
+  end
+
+  defp canonical_terms(_terms), do: @unavailable
 
   defp expired_user_tx?(%{kind: "user_tx", expires_at: exp}), do: System.os_time(:second) > exp
   defp expired_user_tx?(_view), do: false

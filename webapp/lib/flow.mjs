@@ -75,8 +75,13 @@ export async function acceptTerms(deps, { account, vHash, ref }) {
       return { ok: false, reason: "invalid_response" };
     return { ok: true, status: "accepted", vHash: body.v_hash };
   }
-  if (res.status === 409 && body.error === "terms_stale")
-    return { ok: false, reason: "terms_stale", vHash: body.v_hash };
+  if (res.status === 409 && body.error === "terms_stale") {
+    const terms = body.terms;
+    if (!terms || typeof terms.v_hash !== "string" || !terms.v_hash ||
+        typeof terms.url !== "string" || !terms.url || body.v_hash !== terms.v_hash)
+      return { ok: false, reason: "invalid_response" };
+    return { ok: false, reason: "terms_stale", terms };
+  }
   if (res.status === 409) return { ok: false, reason: "version_mismatch" };
   if (res.status === 422) return { ok: false, reason: "invalid", field: body.field };
   return { ok: false, reason: body.error || `http_${res.status}` };

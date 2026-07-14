@@ -34,6 +34,7 @@ export const MESSAGES = {
 function enterGeoDeadState(target, get = $) {
   get("pay").hidden = true;
   get("terms").hidden = true;
+  get("manual").hidden = true;
   get("terms-accept").disabled = true;
   paintStatus(target, MESSAGES.geo_blocked, "error");
 }
@@ -43,7 +44,9 @@ export function showTermsPrompt(deps, { account, terms, ref, retry }, get = $, a
   const button = get("terms-accept");
   const pay = get("pay");
   const status = get("status");
-  let vHash = terms.v_hash;
+  let currentTerms = terms;
+
+  get("manual").hidden = true;
 
   if (!account) {
     box.hidden = true;
@@ -66,7 +69,7 @@ export function showTermsPrompt(deps, { account, terms, ref, retry }, get = $, a
     paintStatus(status, "Waiting for your signature…");
     let result;
     try {
-      result = await acceptFn(deps, { account, vHash, ref });
+      result = await acceptFn(deps, { account, vHash: currentTerms.v_hash, ref });
     } catch (_) {
       result = { ok: false, reason: "request_failed" };
     }
@@ -75,7 +78,8 @@ export function showTermsPrompt(deps, { account, terms, ref, retry }, get = $, a
       pay.hidden = false;
       await retry();
     } else if (result.reason === "terms_stale") {
-      vHash = result.vHash;
+      currentTerms = result.terms;
+      get("terms-link").href = currentTerms.url;
       paintStatus(status, MESSAGES.terms_stale, "error");
       button.disabled = false;
     } else if (result.reason === "geo_blocked") {
