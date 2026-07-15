@@ -19,6 +19,77 @@ export async function connectWallet({ provider }) {
   return { ok: true, account: accounts[0], chainId: parseInt(chainHex, 16) };
 }
 
+/**
+ * Wallet-vs-config chain alignment (EIP-3326 switch + EIP-3085 add). Runs
+ * ONLY after the config-drift gate passed — order and config agree, so
+ * `config.chainId` is the one right network and asking the wallet to switch
+ * is safe: the wallet shows its own confirmation, and the surrounding flow
+ * only ever runs from a user tap. A wallet that does not know the chain
+ * (4902, plain or MetaMask-mobile-wrapped) is offered the config's optional
+ * `chain` metadata. Every failure — rejection, missing metadata, a switch
+ * that silently did not land — stays the typed `wrong_chain`; the pinned
+ * chain is re-read afterwards so nothing is ever signed on the wrong network
+ * on the strength of a resolved promise alone.
+ */
+export async function ensureChain(deps, conn) {
+  const { provider, config } = deps;
+  if (conn.chainId === config.chainId) return conn;
+  const wrong = { ok: false, reason: "wrong_chain", expected: config.chainId };
+  const chainId = "0x" + config.chainId.toString(16);
+
+  try {
+    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId }] });
+  } catch (e) {
+    const params = addChainParams(config);
+    if (!unrecognizedChain(e) || !params) return wrong;
+    try {
+      // MetaMask prompts add + switch as one step; the re-read below verifies.
+      await provider.request({ method: "wallet_addEthereumChain", params: [params] });
+    } catch (_) {
+      return wrong;
+    }
+  }
+
+  try {
+    const chainHex = await provider.request({ method: "eth_chainId" });
+    if (parseInt(chainHex, 16) !== config.chainId) return wrong;
+  } catch (_) {
+    return wrong;
+  }
+  return { ...conn, chainId: config.chainId };
+}
+
+// 4902 = unrecognized chain (EIP-3326). MetaMask mobile has long shipped it
+// wrapped inside a -32603 internal error's data.
+function unrecognizedChain(e) {
+  return !!e && (e.code === 4902 || e?.data?.originalError?.code === 4902);
+}
+
+/**
+ * EIP-3085 params from the config's optional `chain` block:
+ *   "chain": { "name": "…", "rpcUrls": ["https://…"], "explorerUrl": "https://…" }
+ * The chain ID always derives from the top-level `chainId` pin (single
+ * source of truth); rpc/explorer URLs must be https. Without a valid block
+ * the add step is skipped and the mismatch stays a typed `wrong_chain`.
+ */
+export function addChainParams(config) {
+  const chain = config && config.chain;
+  const rpcUrls = Array.isArray(chain?.rpcUrls)
+    ? chain.rpcUrls.filter((u) => typeof u === "string" && /^https:\/\//.test(u))
+    : [];
+  if (!chain || typeof chain.name !== "string" || !chain.name || rpcUrls.length === 0) return null;
+
+  const params = {
+    chainId: "0x" + config.chainId.toString(16),
+    chainName: chain.name,
+    rpcUrls,
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  };
+  if (typeof chain.explorerUrl === "string" && /^https:\/\//.test(chain.explorerUrl))
+    params.blockExplorerUrls = [chain.explorerUrl];
+  return params;
+}
+
 function authBody(deps, extra) {
   const auth = deps.token ? { token: deps.token } : { init_data: deps.initData };
   return JSON.stringify({ v: deps.config.version, ...auth, ...extra });
@@ -212,18 +283,19 @@ export async function signAndSubmit(deps, { orderRef, order, account, nonce }) {
  * The whole §6.3 handshake: fetch order → sign → submit. The order is
  * fetched BEFORE the wallet is connected (0.3.1): a drifted deployment must
  * be refused before ANY wallet interaction, so the config-drift gate needs
- * the order's runtime chain id first. The wallet-vs-config chain check is
- * unchanged — it now runs only when order and config already agree.
+ * the order's runtime chain id first. The wallet-vs-config chain check runs
+ * only when order and config already agree — and asks the wallet to switch
+ * (ensureChain) instead of dead-ending on a fixable mismatch.
  */
 export async function runPermitFlow(deps, orderRef, fetched = null) {
   fetched ??= await fetchOrder(deps, orderRef);
   if (!fetched.ok) return fetched;
   if (configDrift(fetched.order, deps.config)) return { ok: false, reason: "config_drift" };
 
-  const conn = await connectWallet(deps);
+  let conn = await connectWallet(deps);
   if (!conn.ok) return conn;
-  if (conn.chainId !== deps.config.chainId)
-    return { ok: false, reason: "wrong_chain", expected: deps.config.chainId };
+  conn = await ensureChain(deps, conn);
+  if (!conn.ok) return conn;
   if (ownerMismatch(fetched.order, conn.account))
     return { ok: false, reason: "wrong_wallet", expected: fetched.order.expected_owner };
   if (termsRequired(fetched.order))
@@ -247,10 +319,10 @@ export async function runUserTxFlow(deps, orderRef, fetched = null) {
   if (configDrift(fetched.order, deps.config)) return { ok: false, reason: "config_drift" };
   if (fetched.order.kind !== "user_tx") return { ok: false, reason: "wrong_kind" };
 
-  const conn = await connectWallet(deps);
+  let conn = await connectWallet(deps);
   if (!conn.ok) return conn;
-  if (conn.chainId !== deps.config.chainId)
-    return { ok: false, reason: "wrong_chain", expected: deps.config.chainId };
+  conn = await ensureChain(deps, conn);
+  if (!conn.ok) return conn;
   // The load-bearing wrong-wallet check: paying an owner-bound order from a
   // different account debits that account while payouts go to the bound
   // wallet (and sells revert on-chain). Refuse before the wallet ever opens.
@@ -297,10 +369,10 @@ export async function runBindFlow(deps, bindRef, fetched = null) {
   if (!fetched.ok) return fetched;
   if (configDrift(fetched.order, deps.config)) return { ok: false, reason: "config_drift" };
 
-  const conn = await connectWallet(deps);
+  let conn = await connectWallet(deps);
   if (!conn.ok) return conn;
-  if (conn.chainId !== deps.config.chainId)
-    return { ok: false, reason: "wrong_chain", expected: deps.config.chainId };
+  conn = await ensureChain(deps, conn);
+  if (!conn.ok) return conn;
   if (termsRequired(fetched.order))
     return { ok: false, reason: "terms_required", terms: fetched.order.terms, account: conn.account };
 

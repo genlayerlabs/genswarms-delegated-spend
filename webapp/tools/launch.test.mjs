@@ -40,3 +40,19 @@ test("go.html uses a CSP-compatible external module", async () => {
   assert.match(html, /<script type="module" src="\.\/go\.mjs"><\/script>/);
   assert.doesNotMatch(html, /<script type="module">\s*\n/);
 });
+
+// Mobile hand-off is TAP-ONLY: a JS-initiated navigation to the wallet
+// universal link from Telegram's in-app browser carries no user gesture, so
+// iOS routes it to the App Store instead of the installed wallet. Desktop is
+// a same-origin hop and may auto-navigate.
+test("auto-navigation is desktop-only", async () => {
+  const { shouldAutoNavigate } = await import("../lib/launch.mjs");
+  assert.equal(shouldAutoNavigate("desktop"), true);
+  assert.equal(shouldAutoNavigate("mobile"), false);
+});
+
+test("go.mjs gates navigation on shouldAutoNavigate and keeps no timed redirect", async () => {
+  const src = await readFile(new URL("../go.mjs", import.meta.url), "utf8");
+  assert.match(src, /shouldAutoNavigate\(route\.mode\)/);
+  assert.doesNotMatch(src, /setTimeout/);
+});

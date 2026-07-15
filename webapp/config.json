@@ -1,6 +1,11 @@
 {
   "version": "0.5.0",
   "chainId": 84532,
+  "chain": {
+    "name": "Base Sepolia",
+    "rpcUrls": ["https://sepolia.base.org"],
+    "explorerUrl": "https://sepolia.basescan.org"
+  },
   "token": "0x0000000000000000000000000000000000000000",
   "tokenName": "USDC",
   "tokenVersion": "2",
