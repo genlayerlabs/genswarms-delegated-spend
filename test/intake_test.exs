@@ -1,5 +1,8 @@
 defmodule DelegatedSpend.IntakeTest do
   use ExUnit.Case
+
+  @moduletag :capture_log
+
   alias DelegatedSpend.Compliance.MemoryStore, as: ComplianceStore
   alias DelegatedSpend.FakeRpc
   alias DelegatedSpend.Intake

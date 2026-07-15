@@ -413,15 +413,18 @@ owns body limits, JSON decoding, and response encoding):
 ```elixir
 def call(conn, ctx) do
   conn = Plug.Conn.fetch_cookies(conn)
-  header = fn name -> conn |> Plug.Conn.get_req_header(name) |> List.first() end
-  ip = conn.remote_ip |> :inet.ntoa() |> to_string()
 
-  meta = %{
-    ip: ip,
-    country: header.("cf-ipcountry"),
-    user_agent: header.("user-agent"),
-    session_id: conn.req_cookies["spend_session"]
-  }
+  meta =
+    DelegatedSpend.Compliance.Meta.build(
+      conn.remote_ip,
+      conn.req_headers,
+      conn.req_cookies,
+      # EXACTLY the number of reverse proxies you operate in front of this
+      # listener (CDN + Caddy/nginx hops). 0 = the socket peer IS the client.
+      trusted_hops: 1,
+      # The header your TRUSTED EDGE sets with the visitor country.
+      country_header: "cf-ipcountry"
+    )
 
   {status, body} = case {conn.method, conn.path_info} do
     {"POST", ["spend", "orders"]} -> Intake.handle_order(conn.params, meta, ctx)
@@ -435,14 +438,24 @@ def call(conn, ctx) do
 end
 ```
 
-The edge/CDN must set or overwrite `CF-IPCountry`, and the origin must accept
-that header only from the trusted edge. Never trust a country header clients
-can supply directly. The package intentionally has no browser-geolocation,
-blocklist, GeoIP database, or network-lookup mode.
+The country never comes from the client. Behind Cloudflare, `cf-ipcountry`
+is set by the edge. Behind your own Caddy or nginx you must (a) resolve the
+country at the edge with a GeoIP module (nginx `ngx_http_geoip2_module`, a
+Caddy MaxMind plugin) into a header of your choosing, and (b) strip or
+overwrite that header on every inbound request so a client can never supply
+it. `trusted_hops` must equal the exact number of proxies you operate: too
+low records your own proxy as every user's IP (worthless evidence), too high
+lets clients spoof `x-forwarded-for` entries. `Meta.build/4` refuses to
+guess — a forwarding chain shorter than the hop count records `ip: nil`.
+The package intentionally has no browser-geolocation, blocklist, GeoIP
+database, or network-lookup mode.
 
 > **Compliance warning:** once `ctx.compliance` is configured, calling a
-> two-arity handler supplies no metadata and therefore denies every request;
-> an empty geo allowlist also denies everyone. Use all five three-arity forms.
+> two-arity handler supplies no metadata and therefore denies every request
+> (each such call logs a warning naming the mistake); an empty geo allowlist
+> also denies everyone. Use all five three-arity forms, and call
+> `DelegatedSpend.Compliance.check!(ctx)` at boot so a config that would
+> deny-all fails the deploy instead of serving 451/503 to everyone.
 > `record_acceptance` is fail-closed: a failure returns `503`, and acceptance
 > is not acknowledged.
 
@@ -477,7 +490,12 @@ compliance = %{
 }
 
 ctx = Map.put(ctx, :compliance, compliance)
+:ok = DelegatedSpend.Compliance.check!(ctx)
 ```
+
+`check!/1` is the `BootCheck` idiom for this config: it validates the
+allowlist, the terms pin, and the store adapter's callbacks at boot, so a
+misconfiguration fails the deploy instead of denying every request.
 
 A hand-copied terms hash is not configuration: hash the bytes read from
 `SPEND_TERMS_PATH`, and make the terms route return those same bytes. Countries

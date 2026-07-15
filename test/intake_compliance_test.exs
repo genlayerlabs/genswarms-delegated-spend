@@ -1,6 +1,10 @@
 defmodule DelegatedSpend.IntakeComplianceTest do
   use ExUnit.Case
 
+  import ExUnit.CaptureLog
+
+  @moduletag :capture_log
+
   alias DelegatedSpend.Compliance.MemoryStore, as: ComplianceStore
   alias DelegatedSpend.Compliance.Terms
   alias DelegatedSpend.Evm.{Address, Secp256k1}
@@ -467,6 +471,54 @@ defmodule DelegatedSpend.IntakeComplianceTest do
     assert stringified_manual == Map.new(manual, fn {key, value} -> {to_string(key), value} end)
 
     assert ComplianceStore.events_for(store, @user_ref) == []
+  end
+
+  test "two-arity calls log the deny-all diagnosis only when compliance is configured", %{
+    ctx: ctx,
+    base_ctx: base_ctx,
+    keeper: keeper
+  } do
+    ref = register_order(keeper)
+    params = order_params(ctx, ref)
+
+    log =
+      capture_log(fn ->
+        assert {451, %{"error" => "geo_blocked"}} = Intake.handle_order(params, ctx)
+      end)
+
+    assert log =~ "handle_order/2"
+    assert log =~ "geofence denies every request"
+
+    log = capture_log(fn -> assert {200, _} = Intake.handle_order(params, base_ctx) end)
+    refute log =~ "handle_order/2"
+  end
+
+  test "user_tx order view withholds the tx payload until terms are accepted", %{
+    ctx: ctx,
+    compliance_store: store,
+    keeper: keeper
+  } do
+    {:ok, %{order_ref: ref}} =
+      Keeper.register_order(keeper, "market_phase", %{
+        user_ref: @user_ref,
+        amount: 0,
+        action_args: [],
+        kind: "user_tx",
+        tx: %{to: "0x" <> String.duplicate("11", 20), data: "0xdeadbeef", value: 0},
+        display: %{summary_lines: ["Sell YES"]}
+      })
+
+    params = order_params(ctx, ref)
+
+    assert {200, %{"kind" => "user_tx", "terms" => %{"required" => true}} = gated} =
+             Intake.handle_order(params, %{country: "US"}, ctx)
+
+    refute Map.has_key?(gated, "tx")
+
+    :ok = ComplianceStore.record_acceptance(store, acceptance(@user_ref, @terms_hash))
+
+    assert {200, %{"terms" => %{"required" => false}, "tx" => %{"data" => "0xdeadbeef"}}} =
+             Intake.handle_order(params, %{country: "US"}, ctx)
   end
 
   test "old-hash and other-user acceptances do not satisfy the current user and hash", %{

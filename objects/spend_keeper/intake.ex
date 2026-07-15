@@ -29,10 +29,15 @@ defmodule DelegatedSpend.Intake do
   alias DelegatedSpend.Intake.{GrantValidation, Rate, TelegramAuth, Token}
   alias DelegatedSpend.Keeper
 
+  require Logger
+
   @unavailable {:error, 503, %{"error" => "unavailable"}}
 
   @doc "GET /orders?order_ref=… — fetch a pending order for the verified user."
-  def handle_order(params, ctx) when is_map(params), do: handle_order(params, %{}, ctx)
+  def handle_order(params, ctx) when is_map(params) do
+    warn_missing_meta(ctx, "handle_order")
+    handle_order(params, %{}, ctx)
+  end
 
   def handle_order(params, meta, ctx) when is_map(params) do
     order_ref = to_string(params["order_ref"] || "")
@@ -47,10 +52,11 @@ defmodule DelegatedSpend.Intake do
           if expired_user_tx?(view) do
             {410, %{"error" => "expired"}}
           else
+            terms_required? = terms != nil && terms["required"] == true
             display = stringify(view.display)
 
             display =
-              if terms && terms["required"] == true && is_map(display),
+              if terms_required? && is_map(display),
                 do: Map.delete(display, "manual"),
                 else: display
 
@@ -78,7 +84,13 @@ defmodule DelegatedSpend.Intake do
             body =
               case view.kind do
                 "user_tx" ->
-                  Map.put(base, "tx", stringify(view.tx))
+                  # The tx map is the executable payload, not display copy:
+                  # withhold it until the current terms are accepted, or the
+                  # dapp-side terms gate could be bypassed by submitting the
+                  # fetched payload from external tooling.
+                  if terms_required?,
+                    do: base,
+                    else: Map.put(base, "tx", stringify(view.tx))
 
                 "bind" ->
                   Map.put(base, "current_wallet", wallet_view(ctx, user_ref))
@@ -104,7 +116,10 @@ defmodule DelegatedSpend.Intake do
   POST /grants — permit envelope for a pending order. Validates strictly
   against pinned config, then hands to the keeper for execution.
   """
-  def handle_grant(params, ctx) when is_map(params), do: handle_grant(params, %{}, ctx)
+  def handle_grant(params, ctx) when is_map(params) do
+    warn_missing_meta(ctx, "handle_grant")
+    handle_grant(params, %{}, ctx)
+  end
 
   def handle_grant(params, meta, ctx) when is_map(params) do
     order_ref = to_string(params["order_ref"] || "")
@@ -153,7 +168,10 @@ defmodule DelegatedSpend.Intake do
   end
 
   @doc "POST /wallet — bind a connected wallet address through a bind order."
-  def handle_wallet(params, ctx) when is_map(params), do: handle_wallet(params, %{}, ctx)
+  def handle_wallet(params, ctx) when is_map(params) do
+    warn_missing_meta(ctx, "handle_wallet")
+    handle_wallet(params, %{}, ctx)
+  end
 
   def handle_wallet(params, meta, ctx) when is_map(params) do
     bind_ref = to_string(params["bind_ref"] || "")
@@ -184,7 +202,10 @@ defmodule DelegatedSpend.Intake do
   end
 
   @doc "POST /orders/submitted — best-effort user_tx hash report; watcher hint only."
-  def handle_submitted(params, ctx) when is_map(params), do: handle_submitted(params, %{}, ctx)
+  def handle_submitted(params, ctx) when is_map(params) do
+    warn_missing_meta(ctx, "handle_submitted")
+    handle_submitted(params, %{}, ctx)
+  end
 
   def handle_submitted(params, meta, ctx) when is_map(params) do
     order_ref = to_string(params["order_ref"] || "")
@@ -217,7 +238,10 @@ defmodule DelegatedSpend.Intake do
   end
 
   @doc "POST /terms — verify and persist current terms acceptance evidence."
-  def handle_terms(params, ctx) when is_map(params), do: handle_terms(params, %{}, ctx)
+  def handle_terms(params, ctx) when is_map(params) do
+    warn_missing_meta(ctx, "handle_terms")
+    handle_terms(params, %{}, ctx)
+  end
 
   def handle_terms(params, meta, ctx) when is_map(params) do
     with :ok <- geofence(meta, ctx),
@@ -250,6 +274,20 @@ defmodule DelegatedSpend.Intake do
   end
 
   # ── auth + rate ────────────────────────────────────────────────────────────
+
+  # Loud diagnosis for the deny-all upgrade trap: a two-arity call supplies no
+  # request meta, so a configured geofence rejects every request with 451.
+  defp warn_missing_meta(ctx, fun) do
+    if is_map(ctx) and Map.has_key?(ctx, :compliance) do
+      Logger.warning(
+        "DelegatedSpend.Intake.#{fun}/2 called with ctx.compliance configured: " <>
+          "no request meta is supplied, so the geofence denies every request — " <>
+          "use #{fun}/3 with edge-derived meta (docs/adoption.md §6)."
+      )
+    end
+
+    :ok
+  end
 
   defp geofence(meta, ctx) do
     case Map.fetch(ctx, :compliance) do
