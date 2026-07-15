@@ -23,7 +23,8 @@ export const MESSAGES = {
   unauthorized: "Could not verify your Telegram session. Reopen this page from the chat button.",
   version_mismatch: "This page is outdated. Close and reopen it from the chat.",
   user_rejected: "Signature declined — nothing was paid.",
-  wrong_chain: "Your wallet is on the wrong network for this payment.",
+  wrong_chain:
+    "Your wallet is on the wrong network for this payment. Tap again and approve the network switch in your wallet.",
   no_account: "No wallet account connected.",
   expired: "This order expired. Go back to the chat and tap again.",
   config_drift: "This page's configuration is out of date (wrong network). Ask the operator to redeploy the wallet app.",

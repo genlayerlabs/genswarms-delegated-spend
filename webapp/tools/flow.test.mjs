@@ -4,7 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { acceptTerms, configDrift, fetchOrder, ownerMismatch, runBindFlow, runPermitFlow, runUserTxFlow, shortAddress, termsRequired, walletDappLink, wrongWalletMessage } from "../lib/flow.mjs";
+import { acceptTerms, addChainParams, configDrift, fetchOrder, ownerMismatch, runBindFlow, runPermitFlow, runUserTxFlow, shortAddress, termsRequired, walletDappLink, wrongWalletMessage } from "../lib/flow.mjs";
 import { buildGrantEnvelope } from "../lib/permit.mjs";
 import { buildTermsEnvelope, buildTermsTypedData } from "../lib/terms.mjs";
 
@@ -968,4 +968,181 @@ test("acceptTerms rejects stale responses without one matching current hash and 
       { ok: false, reason: "invalid_response" }
     );
   }
+});
+
+// ── network auto-switch (ensureChain: EIP-3326 switch + EIP-3085 add) ────────
+// The chain gate no longer dead-ends on a fixable mismatch: it asks the
+// wallet to switch (its own confirmation UI), adds the chain from the
+// config's optional `chain` block on 4902, and RE-READS eth_chainId before
+// proceeding — a resolved promise alone never authorizes signing.
+
+const CHAIN_CONFIG = {
+  ...CONFIG,
+  chain: {
+    name: "Base Sepolia",
+    rpcUrls: ["https://sepolia.base.org"],
+    explorerUrl: "https://sepolia.basescan.org",
+  },
+};
+
+test("wrong chain → switch requested with the pinned hex id, then the flow completes", async () => {
+  let chain = "0x1";
+  const provider = mockProvider({
+    eth_chainId: () => chain,
+    wallet_switchEthereumChain: ({ params }) => {
+      assert.deepEqual(params, [{ chainId: "0x14a34" }]);
+      chain = "0x14a34";
+      return null;
+    },
+  });
+  const fetchFn = mockFetch(happyRoutes);
+
+  const result = await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1");
+  assert.equal(result.ok, true);
+
+  // the switch lands BEFORE anything is signed
+  const methods = provider.calls.map((c) => c.method);
+  assert.ok(methods.indexOf("wallet_switchEthereumChain") < methods.indexOf("eth_signTypedData_v4"));
+});
+
+test("switch rejection stays a typed wrong_chain — nothing signed, no grant POSTed", async () => {
+  const provider = mockProvider({
+    eth_chainId: () => "0x1",
+    wallet_switchEthereumChain: () => {
+      const e = new Error("rejected");
+      e.code = 4001;
+      throw e;
+    },
+  });
+  const fetchFn = mockFetch(happyRoutes);
+
+  const result = await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1");
+  assert.deepEqual(result, { ok: false, reason: "wrong_chain", expected: CONFIG.chainId });
+  assert.ok(!provider.calls.some((c) => c.method === "eth_signTypedData_v4"));
+  assert.equal(fetchFn.posts.filter((p) => p.url.endsWith("/grants")).length, 0);
+});
+
+test("unknown chain (4902) → wallet_addEthereumChain from the config chain block, then completes (bind wiring)", async () => {
+  let chain = "0x1";
+  const provider = mockProvider({
+    eth_chainId: () => chain,
+    wallet_switchEthereumChain: () => {
+      const e = new Error("Unrecognized chain ID");
+      e.code = 4902;
+      throw e;
+    },
+    // MetaMask's add prompt switches in the same step
+    wallet_addEthereumChain: ({ params }) => {
+      assert.deepEqual(params, [
+        {
+          chainId: "0x14a34",
+          chainName: "Base Sepolia",
+          rpcUrls: ["https://sepolia.base.org"],
+          nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+          blockExplorerUrls: ["https://sepolia.basescan.org"],
+        },
+      ]);
+      chain = "0x14a34";
+      return null;
+    },
+  });
+  const fetchFn = mockFetch({
+    orders: bindOrders,
+    wallet: (body) => ({ status: 200, json: { status: "bound", address: body.address } }),
+  });
+
+  const res = await runBindFlow({ provider, fetchFn, config: CHAIN_CONFIG, initData: "", token: "t" }, "b1");
+  assert.equal(res.ok, true);
+  assert.equal(res.address, ACCOUNT);
+});
+
+test("MetaMask-mobile wrapped 4902 (-32603 originalError) also triggers the add (user_tx wiring)", async () => {
+  let chain = "0x1";
+  const provider = mockProvider({
+    eth_chainId: () => chain,
+    wallet_switchEthereumChain: () => {
+      const e = new Error("Internal JSON-RPC error.");
+      e.code = -32603;
+      e.data = { originalError: { code: 4902 } };
+      throw e;
+    },
+    wallet_addEthereumChain: () => {
+      chain = "0x14a34";
+      return null;
+    },
+    eth_sendTransaction: () => "0x" + "ef".repeat(32),
+  });
+  const fetchFn = mockFetch({
+    orders: () => ({
+      status: 200,
+      json: {
+        order_ref: "r1",
+        kind: "user_tx",
+        amount: 0,
+        expires_at: 9_999_999_999,
+        tx: { to: "0x" + "11".repeat(20), data: "0xdeadbeef", value: 0 },
+        display: {},
+      },
+    }),
+    submitted: () => ({ status: 200, json: { status: "noted" } }),
+  });
+
+  const res = await runUserTxFlow({ provider, fetchFn, config: CHAIN_CONFIG, initData: "", token: "t" }, "r1");
+  assert.equal(res.ok, true);
+});
+
+test("4902 without a config chain block → wrong_chain, no add attempted", async () => {
+  const provider = mockProvider({
+    eth_chainId: () => "0x1",
+    wallet_switchEthereumChain: () => {
+      const e = new Error("Unrecognized chain ID");
+      e.code = 4902;
+      throw e;
+    },
+  });
+  const fetchFn = mockFetch(happyRoutes);
+
+  const result = await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1");
+  assert.deepEqual(result, { ok: false, reason: "wrong_chain", expected: CONFIG.chainId });
+  assert.ok(!provider.calls.some((c) => c.method === "wallet_addEthereumChain"));
+});
+
+test("a switch that resolves without landing on the pinned chain → wrong_chain (re-read is authoritative)", async () => {
+  const provider = mockProvider({
+    eth_chainId: () => "0x1",
+    wallet_switchEthereumChain: () => null,
+  });
+  const fetchFn = mockFetch(happyRoutes);
+
+  const result = await runPermitFlow({ provider, fetchFn, config: CONFIG, initData: "x" }, "oref-1");
+  assert.deepEqual(result, { ok: false, reason: "wrong_chain", expected: CONFIG.chainId });
+  assert.ok(!provider.calls.some((c) => c.method === "eth_signTypedData_v4"));
+});
+
+test("config drift never asks the wallet to switch — there is no right chain until redeploy", async () => {
+  const provider = mockProvider();
+  const fetchFn = mockFetch({
+    orders: () => ({ status: 200, json: { ...ORDER, chain_id: 8453 } }),
+  });
+
+  const result = await runPermitFlow({ provider, fetchFn, config: CHAIN_CONFIG, initData: "x" }, "oref-1");
+  assert.deepEqual(result, { ok: false, reason: "config_drift" });
+  assert.equal(provider.calls.length, 0);
+});
+
+test("addChainParams: chain id derives from the top-level pin; non-https URLs are dropped; block optional", () => {
+  assert.deepEqual(addChainParams(CHAIN_CONFIG), {
+    chainId: "0x14a34",
+    chainName: "Base Sepolia",
+    rpcUrls: ["https://sepolia.base.org"],
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    blockExplorerUrls: ["https://sepolia.basescan.org"],
+  });
+
+  assert.equal(addChainParams(CONFIG), null);
+  assert.equal(addChainParams({ ...CONFIG, chain: { name: "X", rpcUrls: ["http://insecure"] } }), null);
+  assert.equal(addChainParams({ ...CONFIG, chain: { rpcUrls: ["https://ok"] } }), null);
+
+  const noExplorer = addChainParams({ ...CONFIG, chain: { name: "X", rpcUrls: ["https://ok"], explorerUrl: "http://nope" } });
+  assert.equal(noExplorer.blockExplorerUrls, undefined);
 });

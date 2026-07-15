@@ -11,6 +11,24 @@ package releases can ship zero contract bytecode changes. `scripts/check-version
 
 ## [Unreleased]
 
+### Added
+
+- Wallet dapp network auto-switch: a wallet-vs-config chain mismatch now asks
+  the wallet to switch (EIP-3326 `wallet_switchEthereumChain`), adds the chain
+  from the new optional `config.json` `chain` block on 4902 (EIP-3085, plain
+  or MetaMask-mobile-wrapped), and re-reads `eth_chainId` before proceeding.
+  Rejections and unlanded switches stay the typed `wrong_chain`; the
+  config-drift dead state still never switches (there is no right chain to
+  switch to until the operator redeploys).
+
+### Fixed
+
+- `go.html` no longer auto-navigates on mobile: a JS-initiated navigation to
+  the wallet universal link from an embedded webview (Telegram's in-app
+  browser) carries no user gesture, so iOS routed it to the App Store instead
+  of the installed wallet. The hand-off is the user's tap on the launch
+  button; desktop keeps its same-origin auto-hop to `index.html`.
+
 ### Planned
 
 - **M2 — delegation lane (ERC-7710):** standing delegation with caveats,
