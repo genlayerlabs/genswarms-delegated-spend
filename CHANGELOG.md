@@ -11,6 +11,19 @@ package releases can ship zero contract bytecode changes. `scripts/check-version
 
 ## [Unreleased]
 
+### Planned
+
+- **M2 — delegation lane (ERC-7710):** standing delegation with caveats,
+  redeemed through the user's account — one-tap payments over the same
+  router path. The base contract already carries the `delegationManager`
+  introspection view and the keeper's grant registry stores delegation
+  grants, but no redemption path exists yet.
+
+## [0.6.0] - 2026-07-21
+
+Geofence-blocklist release. No Solidity bytes changed; `CONTRACT_VERSION`
+remains `0.2.0`.
+
 ### Changed
 
 - **The geofence is now a country blocklist derived from the terms.**
@@ -48,14 +61,6 @@ package releases can ship zero contract bytecode changes. `scripts/check-version
   browser) carries no user gesture, so iOS routed it to the App Store instead
   of the installed wallet. The hand-off is the user's tap on the launch
   button; desktop keeps its same-origin auto-hop to `index.html`.
-
-### Planned
-
-- **M2 — delegation lane (ERC-7710):** standing delegation with caveats,
-  redeemed through the user's account — one-tap payments over the same
-  router path. The base contract already carries the `delegationManager`
-  introspection view and the keeper's grant registry stores delegation
-  grants, but no redemption path exists yet.
 
 ## [0.5.0] - 2026-07-14
 
