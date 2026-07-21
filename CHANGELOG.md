@@ -13,13 +13,16 @@ package releases can ship zero contract bytecode changes. `scripts/check-version
 
 ### Changed
 
-- **The geofence is now a country blocklist.** `ctx.compliance.geo_allow`
-  (allowlist) is replaced by `:geo_block`, mirroring how the terms name the
-  restricted countries; the reference env var is now
-  `SPEND_GEOFENCE_BLOCKED_COUNTRIES`. The fail-closed posture is unchanged:
-  missing country evidence, a missing/empty/malformed blocklist, and a
-  malformed blocklist entry all still deny with `451`, and
-  `Compliance.check!/1` rejects a stale `:geo_allow` key by name at boot.
+- **The geofence is now a country blocklist derived from the terms.**
+  `ctx.compliance.geo_allow` (allowlist) is replaced by `:geo_block`, and the
+  blocklist is no longer configuration: `Terms.restricted_countries/1` parses
+  it from a `Restricted countries: CU, IR, KP.` line in the same terms bytes
+  that are hashed for acceptance, so the geofence cannot drift from the served
+  terms (the `SPEND_GEOFENCE_COUNTRIES` env var is gone). The fail-closed
+  posture is unchanged: missing country evidence, a missing/empty/malformed
+  blocklist, and a malformed blocklist entry all still deny with `451`;
+  `Compliance.check!/1` rejects a stale `:geo_allow` key by name at boot, and
+  a terms rewrite that breaks the marker line fails the deploy.
 
 ### Added
 

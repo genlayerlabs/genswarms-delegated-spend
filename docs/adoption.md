@@ -482,8 +482,10 @@ the configured URL:
 terms_bytes = File.read!(System.fetch_env!("SPEND_TERMS_PATH"))
 
 compliance = %{
-  geo_block:
-    System.fetch_env!("SPEND_GEOFENCE_BLOCKED_COUNTRIES") |> String.split(",", trim: true),
+  # Derived from the SAME bytes that are hashed for acceptance: a terms
+  # update changes the accepted hash and the blocklist in one atomic step,
+  # so the geofence can never drift from the served terms.
+  geo_block: DelegatedSpend.Compliance.Terms.restricted_countries(terms_bytes),
   terms: %{
     hash: DelegatedSpend.Compliance.Terms.hash_terms(terms_bytes),
     url: System.fetch_env!("SPEND_TERMS_URL")
@@ -501,10 +503,13 @@ misconfiguration fails the deploy instead of denying every request. A stale
 `:geo_allow` key (the pre-0.6 allowlist) is rejected by name.
 
 A hand-copied terms hash is not configuration: hash the bytes read from
-`SPEND_TERMS_PATH`, and make the terms route return those same bytes. Countries
-are comma-separated ISO 3166-1 alpha-2 codes; the blocklist must mirror the
-restricted-countries list in the served terms — the geofence and the terms are
-one legal statement, updated together.
+`SPEND_TERMS_PATH`, and make the terms route return those same bytes. The
+blocklist is likewise not hand-copied: the terms document must contain exactly
+one line of the form `Restricted countries: CU, IR, KP.` (case-insensitive
+marker, ISO 3166-1 alpha-2 codes, optional trailing period), and
+`Terms.restricted_countries/1` parses it from the same bytes. The geofence and
+the terms are one legal statement updated in one step; a terms rewrite that
+breaks the marker line fails the deploy.
 
 Implement the four `DelegatedSpend.Compliance.Store` callbacks:
 `record_acceptance/2`, `get_acceptance/3`, `record_event/2`, and
@@ -570,8 +575,8 @@ consuming app's responsibility.
   export/deletion, and GDPR policy.
 - **Fail-closed launch warning:** exercise every route through its three-arity
   handler with a well-formed country blocklist. Two-arity handlers and an
-  empty or malformed `SPEND_GEOFENCE_BLOCKED_COUNTRIES` deny all users once
-  compliance is configured.
+  empty or malformed restricted-countries line in the terms deny all users
+  once compliance is configured.
 
 ## The testing bar
 

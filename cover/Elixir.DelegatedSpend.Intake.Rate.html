@@ -140,7 +140,7 @@ td.source {
 </head>
 <body>
 <h1><code>cover/Elixir.DelegatedSpend.Intake.Rate.html</code></h1>
-<footer><p>File generated from <code>/Users/albert/conductor/workspaces/genswarms-wallet-bridge/ndjamena/objects/spend_keeper/intake.ex</code> by <a href="http://erlang.org/doc/man/cover.html">cover</a> at 2026-07-21 at 10:07:30</p></footer>
+<footer><p>File generated from <code>/Users/albert/conductor/workspaces/genswarms-wallet-bridge/ndjamena/objects/spend_keeper/intake.ex</code> by <a href="http://erlang.org/doc/man/cover.html">cover</a> at 2026-07-21 at 10:27:48</p></footer>
 <table>
 <tbody>
 <tr>
@@ -3110,12 +3110,12 @@ td.source {
 </tr>
 <tr class="hit">
 <td class="line" id="L594"><a href="#L594">594</a></td>
-<td class="hits">68</td>
+<td class="hits">72</td>
 <td class="source"><code>    {:ok, pid} = start_link(window_s)</code></td>
 </tr>
 <tr class="hit">
 <td class="line" id="L595"><a href="#L595">595</a></td>
-<td class="hits">68</td>
+<td class="hits">72</td>
 <td class="source"><code>    pid</code></td>
 </tr>
 <tr>
@@ -3155,17 +3155,17 @@ td.source {
 </tr>
 <tr class="hit">
 <td class="line" id="L603"><a href="#L603">603</a></td>
-<td class="hits">68</td>
+<td class="hits">72</td>
 <td class="source"><code>  def start_link(window_s \\ 60, opts \\ []) do</code></td>
 </tr>
 <tr class="hit">
 <td class="line" id="L604"><a href="#L604">604</a></td>
-<td class="hits">69</td>
+<td class="hits">73</td>
 <td class="source"><code>    agent_opts = if opts[:name], do: [name: opts[:name]], else: []</code></td>
 </tr>
 <tr class="hit">
 <td class="line" id="L605"><a href="#L605">605</a></td>
-<td class="hits">69</td>
+<td class="hits">73</td>
 <td class="source"><code>    Agent.start_link(fn -&gt; %{window_s: window_s, buckets: %{}} end, agent_opts)</code></td>
 </tr>
 <tr>
@@ -3185,12 +3185,12 @@ td.source {
 </tr>
 <tr class="hit">
 <td class="line" id="L609"><a href="#L609">609</a></td>
-<td class="hits">161</td>
+<td class="hits">172</td>
 <td class="source"><code>    Agent.get_and_update(pid, fn s -&gt;</code></td>
 </tr>
 <tr class="hit">
 <td class="line" id="L610"><a href="#L610">610</a></td>
-<td class="hits">161</td>
+<td class="hits">172</td>
 <td class="source"><code>      win = div(now_s, s.window_s)</code></td>
 </tr>
 <tr>
@@ -3200,22 +3200,22 @@ td.source {
 </tr>
 <tr class="hit">
 <td class="line" id="L612"><a href="#L612">612</a></td>
-<td class="hits">161</td>
+<td class="hits">172</td>
 <td class="source"><code>      {count, buckets} =</code></td>
 </tr>
 <tr class="hit">
 <td class="line" id="L613"><a href="#L613">613</a></td>
-<td class="hits">161</td>
+<td class="hits">172</td>
 <td class="source"><code>        case s.buckets[key] do</code></td>
 </tr>
 <tr class="hit">
 <td class="line" id="L614"><a href="#L614">614</a></td>
-<td class="hits">91</td>
+<td class="hits">94</td>
 <td class="source"><code>          {^win, c} -&gt; {c, s.buckets}</code></td>
 </tr>
 <tr class="hit">
 <td class="line" id="L615"><a href="#L615">615</a></td>
-<td class="hits">70</td>
+<td class="hits">78</td>
 <td class="source"><code>          _ -&gt; {0, Map.put(s.buckets, key, {win, 0})}</code></td>
 </tr>
 <tr>
@@ -3230,7 +3230,7 @@ td.source {
 </tr>
 <tr class="hit">
 <td class="line" id="L618"><a href="#L618">618</a></td>
-<td class="hits">161</td>
+<td class="hits">172</td>
 <td class="source"><code>      if count &lt; max do</code></td>
 </tr>
 <tr>

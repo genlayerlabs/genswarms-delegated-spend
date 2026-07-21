@@ -6,7 +6,7 @@ defmodule DelegatedSpend.IntakeComplianceTest do
   @moduletag :capture_log
 
   alias DelegatedSpend.Compliance.MemoryStore, as: ComplianceStore
-  alias DelegatedSpend.Compliance.Terms
+  alias DelegatedSpend.Compliance.{Meta, Terms}
   alias DelegatedSpend.Evm.{Address, Secp256k1}
   alias DelegatedSpend.FakeRpc
   alias DelegatedSpend.Intake
@@ -713,6 +713,59 @@ defmodule DelegatedSpend.IntakeComplianceTest do
              )
 
     assert [_, _] = ComplianceStore.events_for(store, nil)
+  end
+
+  test "denial budgets are independent per country", %{
+    base_ctx: base_ctx,
+    compliance_store: store
+  } do
+    ctx =
+      base_ctx
+      |> Map.put(:rate, {Rate.start(60), 1})
+      |> Map.put(:compliance, %{geo_block: ["CU", "KP"], store: {ComplianceStore, store}})
+
+    assert {451, _} = Intake.handle_order(%{}, %{country: "CU"}, ctx)
+    # second CU denial is over that country's budget of 1
+    assert {451, _} = Intake.handle_order(%{}, %{country: "CU"}, ctx)
+    # KP has its own untouched budget
+    assert {451, _} = Intake.handle_order(%{}, %{country: "KP"}, ctx)
+
+    assert [%{meta: %{country: "CU"}}, %{meta: %{country: "KP"}}] =
+             ComplianceStore.events_for(store, nil)
+  end
+
+  test "edge metadata composed by Meta.build drives the geofence end to end", %{
+    ctx: ctx,
+    compliance_store: store,
+    keeper: keeper
+  } do
+    params = order_params(ctx, register_order(keeper))
+
+    build = fn country_headers ->
+      Meta.build(
+        {127, 0, 0, 1},
+        [{"x-forwarded-for", "203.0.113.7"}, {"user-agent", "wallet-test/1.0"}] ++
+          country_headers,
+        %{"spend_session" => "s-1"},
+        trusted_hops: 1,
+        country_header: "cf-ipcountry"
+      )
+    end
+
+    assert {451, %{"error" => "geo_blocked"}} =
+             Intake.handle_order(params, build.([{"CF-IPCountry", "cu"}]), ctx)
+
+    # a client-supplied country under any other header name never counts —
+    # missing trusted evidence denies
+    assert {451, _} = Intake.handle_order(params, build.([{"x-country", "US"}]), ctx)
+
+    assert {200, _} = Intake.handle_order(params, build.([{"CF-IPCountry", "US"}]), ctx)
+
+    assert [%{kind: "geo_denied", meta: denied}, %{kind: "geo_denied", meta: no_evidence}] =
+             ComplianceStore.events_for(store, nil)
+
+    assert %{country: "CU", ip: "203.0.113.7", session_id: "s-1"} = denied
+    assert no_evidence.country == nil
   end
 
   test "two-arity denials record the missing-meta evidence", %{
