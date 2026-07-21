@@ -23,6 +23,9 @@ package releases can ship zero contract bytecode changes. `scripts/check-version
   blocklist, and a malformed blocklist entry all still deny with `451`;
   `Compliance.check!/1` rejects a stale `:geo_allow` key by name at boot, and
   a terms rewrite that breaks the marker line fails the deploy.
+  **Upgrade note:** adding the marker line to an already-deployed terms
+  document changes the terms bytes, so the accepted hash rotates and every
+  existing user must re-accept — plan the upgrade as a terms release.
 
 ### Added
 

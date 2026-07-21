@@ -580,7 +580,9 @@ consuming app's responsibility.
 - The app serves the exact terms bytes hashed at boot; the production store
   passes `test/compliance_store_test.exs` semantics.
 - Legal approved nullable session evidence, audit-event durability, retention,
-  export/deletion, and GDPR policy.
+  export/deletion, and GDPR policy — explicitly including `geo_denied`
+  evidence, which records the IP and user agent of visitors who were refused
+  service and therefore have no user relationship with the app.
 - **Fail-closed launch warning:** exercise every route through its three-arity
   handler with a well-formed country blocklist. Two-arity handlers and an
   empty or malformed restricted-countries line in the terms deny all users
