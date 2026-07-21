@@ -511,6 +511,14 @@ marker, ISO 3166-1 alpha-2 codes, optional trailing period), and
 the terms are one legal statement updated in one step; a terms rewrite that
 breaks the marker line fails the deploy.
 
+Two consequences to plan for, deliberately coupled: changing the blocklist
+changes the terms bytes, so the accepted hash rotates and EVERY user must
+re-accept the terms (the restriction is a term — users re-consent to it), and
+there is no way to change the blocklist without deploying a terms update.
+Whoever owns the terms document must know the marker line is machine-read:
+rewording it is a config change, and boot will refuse it loudly rather than
+guess.
+
 Implement the four `DelegatedSpend.Compliance.Store` callbacks:
 `record_acceptance/2`, `get_acceptance/3`, `record_event/2`, and
 `events_for/2`. The executable adapter specification is
