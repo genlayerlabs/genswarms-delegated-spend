@@ -140,7 +140,7 @@ td.source {
 </head>
 <body>
 <h1><code>cover/Elixir.DelegatedSpend.Keeper.html</code></h1>
-<footer><p>File generated from <code>/Users/albert/conductor/workspaces/genswarms-wallet-bridge/ndjamena/objects/spend_keeper/keeper.ex</code> by <a href="http://erlang.org/doc/man/cover.html">cover</a> at 2026-07-21 at 10:27:48</p></footer>
+<footer><p>File generated from <code>/Users/albert/conductor/workspaces/genswarms-wallet-bridge/ndjamena/objects/spend_keeper/keeper.ex</code> by <a href="http://erlang.org/doc/man/cover.html">cover</a> at 2026-07-21 at 10:43:12</p></footer>
 <table>
 <tbody>
 <tr>
@@ -360,12 +360,12 @@ td.source {
 </tr>
 <tr class="hit">
 <td class="line" id="L44"><a href="#L44">44</a></td>
-<td class="hits">125</td>
+<td class="hits">126</td>
 <td class="source"><code>    opts = Map.new(opts)</code></td>
 </tr>
 <tr class="hit">
 <td class="line" id="L45"><a href="#L45">45</a></td>
-<td class="hits">125</td>
+<td class="hits">126</td>
 <td class="source"><code>    Enum.each(@enforce_opts, &amp;Map.fetch!(opts, &amp;1))</code></td>
 </tr>
 <tr>
@@ -375,12 +375,12 @@ td.source {
 </tr>
 <tr class="hit">
 <td class="line" id="L47"><a href="#L47">47</a></td>
-<td class="hits">124</td>
+<td class="hits">125</td>
 <td class="source"><code>    case Map.get(opts, :name) do</code></td>
 </tr>
 <tr class="hit">
 <td class="line" id="L48"><a href="#L48">48</a></td>
-<td class="hits">122</td>
+<td class="hits">123</td>
 <td class="source"><code>      nil -&gt; GenServer.start_link(__MODULE__, opts)</code></td>
 </tr>
 <tr class="hit">
@@ -555,7 +555,7 @@ td.source {
 </tr>
 <tr class="hit">
 <td class="line" id="L83"><a href="#L83">83</a></td>
-<td class="hits">123</td>
+<td class="hits">124</td>
 <td class="source"><code>    state = %{</code></td>
 </tr>
 <tr>
@@ -580,12 +580,12 @@ td.source {
 </tr>
 <tr class="hit">
 <td class="line" id="L88"><a href="#L88">88</a></td>
-<td class="hits">123</td>
+<td class="hits">124</td>
 <td class="source"><code>      chain_id: opts.chain_id,</code></td>
 </tr>
 <tr class="hit">
 <td class="line" id="L89"><a href="#L89">89</a></td>
-<td class="hits">123</td>
+<td class="hits">124</td>
 <td class="source"><code>      store: opts.store,</code></td>
 </tr>
 <tr>
@@ -600,12 +600,12 @@ td.source {
 </tr>
 <tr class="hit">
 <td class="line" id="L92"><a href="#L92">92</a></td>
-<td class="hits">123</td>
+<td class="hits">124</td>
 <td class="source"><code>      allowlist: MapSet.new(opts.source_allowlist),</code></td>
 </tr>
 <tr class="hit">
 <td class="line" id="L93"><a href="#L93">93</a></td>
-<td class="hits">123</td>
+<td class="hits">124</td>
 <td class="source"><code>      order_ttl_s: opts.order_ttl_s,</code></td>
 </tr>
 <tr>
@@ -720,7 +720,7 @@ td.source {
 </tr>
 <tr class="hit">
 <td class="line" id="L116"><a href="#L116">116</a></td>
-<td class="hits">123</td>
+<td class="hits">124</td>
 <td class="source"><code>    Process.send_after(self(), :sweep, state.sweep_ms)</code></td>
 </tr>
 <tr>
@@ -745,7 +745,7 @@ td.source {
 </tr>
 <tr class="hit">
 <td class="line" id="L121"><a href="#L121">121</a></td>
-<td class="hits">123</td>
+<td class="hits">124</td>
 <td class="source"><code>    if Map.get(opts, :reconcile_on_init, false), do: send(self(), :reconcile_boot)</code></td>
 </tr>
 <tr>

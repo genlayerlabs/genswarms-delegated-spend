@@ -313,9 +313,16 @@ defmodule DelegatedSpend.Intake do
   # keys by NORMALIZED COUNTRY, a bounded keyspace — this is an
   # unauthenticated pre-rate-limit path, and per-IP keys would grow the
   # limiter's never-evicted bucket map without bound.
+  # rescue+catch: a dead limiter EXITS the caller (:noproc), and recording
+  # must never change the 451 — without a live budget the writes can't be
+  # bounded, so the denial goes unrecorded rather than uncapped.
   defp record_denial(ctx, country, meta) do
     if denial_budget?(ctx, country),
       do: record_event(ctx, nil, "geo_denied", nil, nil, meta)
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   defp denial_budget?(%{rate: {limiter, max}}, country),

@@ -768,6 +768,25 @@ defmodule DelegatedSpend.IntakeComplianceTest do
     assert no_evidence.country == nil
   end
 
+  test "a dead rate limiter cannot crash the 451; the denial goes unrecorded", %{
+    base_ctx: base_ctx,
+    compliance_store: store
+  } do
+    limiter = Rate.start(60)
+    :ok = Agent.stop(limiter)
+
+    ctx =
+      base_ctx
+      |> Map.put(:rate, {limiter, 1})
+      |> Map.put(:compliance, %{geo_block: ["CU"], store: {ComplianceStore, store}})
+
+    assert {451, %{"error" => "geo_blocked"}} =
+             Intake.handle_order(%{}, %{country: "CU"}, ctx)
+
+    # without a live budget the write cannot be bounded, so it is skipped
+    assert ComplianceStore.events_for(store, nil) == []
+  end
+
   test "two-arity denials record the missing-meta evidence", %{
     ctx: ctx,
     compliance_store: store,
